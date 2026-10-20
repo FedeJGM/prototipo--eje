@@ -1,0 +1,203 @@
+Option Explicit
+'ThisWorkbook only. Replace its previous events; do not append or use a standard module.
+'Companion: Módulo4.txt revision 2 (accented filename), not the older Modulo4.txt.
+'Static verification only; compile and test both files together in a copy of the workbook.
+
+Private ejecutando As Boolean
+Private inicializado As Boolean
+Private edicionSinInicializar As Boolean
+Private errorContexto As String
+Private errorCambio As String
+
+Private Sub Workbook_Open()
+    'Initialize locks, maintenance and metadata, without preparing all data rows.
+    PrepararContexto Nothing, Nothing
+End Sub
+
+Private Sub Workbook_SheetActivate(ByVal Sh As Object)
+    Dim ws As Worksheet
+    If ejecutando Then Exit Sub
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    Set ws = Sh
+    If Not ws.Parent Is Me Then Exit Sub
+    PrepararContexto ws, Nothing
+End Sub
+
+Private Sub Workbook_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
+    Dim ws As Worksheet
+    If ejecutando Then Exit Sub
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    Set ws = Sh
+    If Not ws.Parent Is Me Then Exit Sub
+    If Not Target.Parent Is ws Then Exit Sub
+    PrepararContexto ws, Target
+End Sub
+
+Private Sub PrepararContexto(ByVal ws As Worksheet, ByVal Target As Range)
+    Dim eventos As Boolean, pantalla As Boolean, detalle As String
+    If ejecutando Then Exit Sub
+    eventos = Application.EnableEvents
+    pantalla = Application.ScreenUpdating
+    ejecutando = True
+    On Error GoTo Fallo
+    Application.EnableEvents = False
+    AsegurarInicializacion
+    If ws Is Nothing Then
+        If TypeOf Application.ActiveSheet Is Worksheet Then
+            If Application.ActiveSheet.Parent Is Me Then Set ws = Application.ActiveSheet
+        End If
+    End If
+    If Not ws Is Nothing Then
+        If Not EsHojaTecnica(ws.Name) Then
+            If Target Is Nothing Then Set Target = SeleccionActual(ws)
+            If Not Target Is Nothing Then CapturarAntesDeEditar ws, Target
+        End If
+    End If
+Salida:
+    RestaurarAplicacion eventos, pantalla, detalle
+    ejecutando = False
+    errorContexto = detalle
+    If detalle <> "" Then
+        MsgBox "No se pudo preparar la protección o la captura previa." & vbCrLf & detalle & vbCrLf & _
+            "No continúe editando. Corrija la causa y seleccione otra celda para reintentar." & vbCrLf & _
+            "El guardado permanecerá bloqueado mientras no se complete este paso.", _
+            vbCritical, "Inicialización o captura pendiente"
+    End If
+    Exit Sub
+Fallo:
+    detalle = "Error " & Err.Number & ": " & Err.Description
+    Resume Salida
+End Sub
+
+Private Sub AsegurarInicializacion()
+    If inicializado Then Exit Sub
+    InicializarLibroTrabajo
+    inicializado = True
+End Sub
+
+Private Function SeleccionActual(ByVal ws As Worksheet) As Range
+    Dim seleccion As Object
+    Set seleccion = Application.Selection
+    If TypeOf seleccion Is Range Then
+        If seleccion.Parent Is ws Then Set SeleccionActual = seleccion
+    ElseIf TypeOf Application.ActiveSheet Is Worksheet Then
+        If Application.ActiveSheet Is ws Then Set SeleccionActual = Application.ActiveCell
+    End If
+End Function
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    Dim ws As Worksheet, eventos As Boolean, pantalla As Boolean, detalle As String
+    If ejecutando Then Exit Sub
+    eventos = Application.EnableEvents
+    pantalla = Application.ScreenUpdating
+    On Error GoTo Fallo
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    Set ws = Sh
+    If Not ws.Parent Is Me Then Exit Sub
+    If Not Target.Parent Is ws Then Exit Sub
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+
+    'Never initialize after a user edit: writes could destroy the emergency Undo.
+    If Not inicializado Then
+        edicionSinInicializar = True
+        MsgBox "El código todavía no estaba inicializado; este cambio no fue procesado." & vbCrLf & _
+            "No siga editando. Cierre sin guardar y vuelva a abrir la copia instalada." & vbCrLf & _
+            "Al instalar el código, seleccione otra celda antes de editar datos.", _
+            vbCritical, "Cambio sin inicialización"
+        Exit Sub
+    End If
+    If errorContexto <> "" Then
+        edicionSinInicializar = True
+        MsgBox "Se editó mientras había una captura o inicialización pendiente." & vbCrLf & _
+            "Cierre sin guardar y vuelva a abrir la copia. No se garantiza recuperar este cambio.", _
+            vbCritical, "Cambio no procesado"
+        Exit Sub
+    End If
+
+    ejecutando = True
+    'Important: enter with events ENABLED. The module suppresses/restores them internally.
+    ProcesarCambioEnHoja ws, Target
+Salida:
+    RestaurarAplicacion eventos, pantalla, detalle
+    ejecutando = False
+    If detalle <> "" Then
+        errorCambio = detalle
+        MsgBox "No se completó el procesamiento del cambio." & vbCrLf & detalle & vbCrLf & _
+            "No se afirma que el contenido anterior haya sido recuperado." & vbCrLf & _
+            "Se bloqueó el guardado. Conserve la sesión para revisar o recuperar datos;" & vbCrLf & _
+            "si no hay un respaldo pendiente, vuelva a la copia guardada antes de continuar.", _
+            vbCritical, "Error procesando cambio"
+    End If
+    Exit Sub
+Fallo:
+    detalle = "Error " & Err.Number & ": " & Err.Description
+    Resume Salida
+End Sub
+
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    Dim eventos As Boolean, pantalla As Boolean, errores As Long, detalle As String
+    If Cancel Then Exit Sub
+    If ejecutando Then
+        Cancel = True
+        Exit Sub
+    End If
+    eventos = Application.EnableEvents
+    pantalla = Application.ScreenUpdating
+    ejecutando = True
+    On Error GoTo Fallo
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    If edicionSinInicializar Then
+        Err.Raise vbObjectError + 1601, , _
+            "Hay cambios no procesados por falta de inicialización/captura. Cierre sin guardar y vuelva a abrir la copia instalada."
+    End If
+    If errorContexto <> "" Then
+        Err.Raise vbObjectError + 1602, , _
+            "Inicialización o captura pendiente: " & errorContexto & vbCrLf & _
+            "Corrija la causa y seleccione nuevamente una celda antes de guardar."
+    End If
+    If errorCambio <> "" Then
+        Err.Raise vbObjectError + 1603, , _
+            "Hay un error de edición sin recuperación confirmada: " & errorCambio & vbCrLf & _
+            "Una nueva selección no elimina este bloqueo. Revise la sesión y los respaldos antes de cerrar."
+    End If
+    'Safe installation bootstrap: saving fresh pasted code does not require a prior Open.
+    'This initializes only if needed; it never runs in the SheetChange handler.
+    AsegurarInicializacion
+    'The API ends maintenance, reprotects and checks every operational sheet.
+    'It also refuses unresolved maintenance changes and retained import backups.
+    errores = ValidarTodasLasHojasTrabajo(Me)
+    If errores > 0 Then Cancel = True
+Salida:
+    RestaurarAplicacion eventos, pantalla, detalle
+    ejecutando = False
+    If detalle <> "" Then
+        Cancel = True
+        MsgBox "No se completó la comprobación antes de guardar." & vbCrLf & detalle, _
+            vbCritical, "Guardado bloqueado"
+    ElseIf errores > 0 Then
+        MsgBox "No es posible guardar: se encontraron " & errores & _
+            " celdas con errores en las hojas de trabajo." & vbCrLf & _
+            "Corrija los datos marcados y vuelva a guardar.", vbExclamation, "Guardado bloqueado"
+    End If
+    Exit Sub
+Fallo:
+    Cancel = True
+    detalle = "Error " & Err.Number & ": " & Err.Description
+    Resume Salida
+End Sub
+
+Private Sub RestaurarAplicacion(ByVal eventos As Boolean, ByVal pantalla As Boolean, ByRef detalle As String)
+    'Only Excel application state is restored here; no new writes or maintenance snapshots.
+    On Error Resume Next
+    Err.Clear
+    Application.ScreenUpdating = pantalla
+    If Err.Number <> 0 Then detalle = detalle & vbCrLf & _
+        "No se pudo restaurar la actualización de pantalla: " & Err.Description
+    Err.Clear
+    Application.EnableEvents = eventos
+    If Err.Number <> 0 Then detalle = detalle & vbCrLf & _
+        "No se pudo restaurar el estado de eventos: " & Err.Description
+    On Error GoTo 0
+End Sub
