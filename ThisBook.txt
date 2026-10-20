@@ -1,0 +1,118 @@
+﻿Option Explicit
+'ThisWorkbook: reemplazar los dos eventos anteriores, no pegar en un módulo estándar.
+'Usar con Modulo4.txt integrado. No añadir a los eventos antiguos.
+'Sin preparación masiva al abrir ni límite fijo de registros.
+'La preparación inicial de hojas existentes sigue siendo manual, en una copia.
+'Revisión estática solamente; pendiente compilar y probar en Excel.
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+
+    Dim ws As Worksheet
+    Dim eventosAnteriores As Boolean
+    Dim pantallaAnterior As Boolean
+    Dim detalleError As String
+
+    eventosAnteriores = Application.EnableEvents
+    pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo ErrorHandler
+
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    Set ws = Sh
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    If Application.Intersect(Target, Application.Union( _
+        ws.Range("A12:G" & ws.Rows.Count), _
+        ws.Range("U12:V" & ws.Rows.Count))) Is Nothing Then Exit Sub
+
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    'El módulo administra la protección y procesa solo las filas afectadas.
+    Call ActualizarEntradaEnHoja(ws, Target)
+
+SalidaSegura:
+
+    On Error Resume Next
+    Err.Clear
+    Application.EnableEvents = False
+    If Err.Number <> 0 Then detalleError = detalleError & vbCrLf & _
+        "No se pudieron mantener desactivados los eventos: " & Err.Description
+    Err.Clear
+    Application.ScreenUpdating = pantallaAnterior
+    If Err.Number <> 0 Then detalleError = detalleError & vbCrLf & _
+        "No se pudo restaurar la actualización de pantalla: " & Err.Description
+    Err.Clear
+    Application.EnableEvents = eventosAnteriores
+    If Err.Number <> 0 Then detalleError = detalleError & vbCrLf & _
+        "No se pudo restaurar el estado de eventos: " & Err.Description
+    On Error GoTo 0
+
+    If detalleError <> "" Then
+        MsgBox "No se completó la actualización de la hoja." & vbCrLf & _
+            detalleError, vbCritical, "Error actualizando hoja"
+    End If
+    Exit Sub
+
+ErrorHandler:
+
+    detalleError = "Error " & Err.Number & ": " & Err.Description
+    Resume SalidaSegura
+
+End Sub
+
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+
+    Dim eventosAnteriores As Boolean
+    Dim pantallaAnterior As Boolean
+    Dim errores As Long
+    Dim detalleError As String
+
+    'Respetar una cancelación que ya estuviera solicitada.
+    If Cancel Then Exit Sub
+
+    eventosAnteriores = Application.EnableEvents
+    pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo ErrorHandler
+
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+
+    'Revisar todas las hojas de trabajo de este libro, incluso desde MENÚ.
+    errores = ValidarTodasLasHojasTrabajo(Me)
+    If errores > 0 Then Cancel = True
+
+SalidaSegura:
+
+    On Error Resume Next
+    Err.Clear
+    Application.EnableEvents = False
+    If Err.Number <> 0 Then detalleError = detalleError & vbCrLf & _
+        "No se pudieron mantener desactivados los eventos: " & Err.Description
+    Err.Clear
+    Application.ScreenUpdating = pantallaAnterior
+    If Err.Number <> 0 Then detalleError = detalleError & vbCrLf & _
+        "No se pudo restaurar la actualización de pantalla: " & Err.Description
+    Err.Clear
+    Application.EnableEvents = eventosAnteriores
+    If Err.Number <> 0 Then detalleError = detalleError & vbCrLf & _
+        "No se pudo restaurar el estado de eventos: " & Err.Description
+    On Error GoTo 0
+
+    If detalleError <> "" Then
+        Cancel = True
+        MsgBox "No se completó la validación automática antes de guardar." & vbCrLf & _
+            detalleError, vbCritical, "Guardado bloqueado"
+    ElseIf errores > 0 Then
+        MsgBox "No es posible guardar: se encontraron " & errores & _
+            " celdas con errores en las hojas de trabajo." & vbCrLf & _
+            "Corrige los datos marcados y vuelve a guardar.", _
+            vbExclamation, "Guardado bloqueado"
+    End If
+    Exit Sub
+
+ErrorHandler:
+
+    Cancel = True
+    detalleError = "Error " & Err.Number & ": " & Err.Description
+    Resume SalidaSegura
+
+End Sub
