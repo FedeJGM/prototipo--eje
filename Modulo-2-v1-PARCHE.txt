@@ -1,0 +1,85 @@
+Sub copiar_reclasificacion()
+
+    Dim hojaOrigenRec As Worksheet
+    Dim hojaDestinoRec As Worksheet
+    Dim zona As Range
+    Dim ultimaCelda As Range
+    Dim ultimaFilaRec As Long
+    Dim filaInicio As Long
+    Dim filaFinal As Long
+    Dim filaDestino As Long
+    Dim fila As Long
+    Dim columna As Long
+    Dim cantidad As Long
+    Dim tieneDatos As Boolean
+    Dim datos As Variant
+    Dim salida() As Variant
+    Dim valor As Variant
+
+'Copiar Reclasificación'
+
+    Set hojaOrigenRec = ActiveSheet
+    ultimaFilaRec = 11
+
+    'Buscar entradas reales; las fórmulas P:U no definen la última partida.
+    For Each zona In hojaOrigenRec.Range("A12:G" & hojaOrigenRec.Rows.Count & _
+                                        ",U12:V" & hojaOrigenRec.Rows.Count).Areas
+        Set ultimaCelda = zona.Find(What:="*", After:=zona.Cells(1, 1), _
+                                   LookIn:=xlValues, LookAt:=xlPart, _
+                                   SearchOrder:=xlByRows, SearchDirection:=xlPrevious, _
+                                   MatchCase:=False, SearchFormat:=False)
+        If Not ultimaCelda Is Nothing Then
+            If ultimaCelda.Row > ultimaFilaRec Then ultimaFilaRec = ultimaCelda.Row
+        End If
+    Next zona
+
+    'Copiar siempre los seis encabezados, aunque no haya partidas.
+    hojaOrigenRec.Range("P11:U11").Copy
+    Workbooks.Add
+    Set hojaDestinoRec = ActiveSheet
+    hojaDestinoRec.Range("A1").PasteSpecial Paste:=xlPasteValues, _
+        Operation:=xlNone, SkipBlanks:=False, Transpose:=False
+
+    filaDestino = 2
+
+    'Leer por bloques y omitir únicamente las filas sin entradas.
+    For filaInicio = 12 To ultimaFilaRec Step 10000
+        filaFinal = filaInicio + 9999
+        If filaFinal > ultimaFilaRec Then filaFinal = ultimaFilaRec
+        datos = hojaOrigenRec.Range("A" & filaInicio & ":V" & filaFinal).Value2
+        ReDim salida(1 To filaFinal - filaInicio + 1, 1 To 6)
+        cantidad = 0
+
+        For fila = 1 To UBound(datos, 1)
+            tieneDatos = False
+            For columna = 1 To 22
+                If columna <= 7 Or columna >= 21 Then
+                    If IsError(datos(fila, columna)) Then
+                        tieneDatos = True
+                    ElseIf Len(CStr(datos(fila, columna))) > 0 Then
+                        tieneDatos = True
+                    End If
+                    If tieneDatos Then Exit For
+                End If
+            Next columna
+
+            If tieneDatos Then
+                cantidad = cantidad + 1
+                For columna = 1 To 6
+                    valor = datos(fila, columna + 15)
+                    If VarType(valor) = vbString Then
+                        'Conservar el texto como valor, aunque empiece con igual.
+                        salida(cantidad, columna) = "'" & valor
+                    Else
+                        salida(cantidad, columna) = valor
+                    End If
+                Next columna
+            End If
+        Next fila
+
+        If cantidad > 0 Then
+            hojaDestinoRec.Range("A" & filaDestino).Resize(UBound(salida, 1), 6).Value2 = salida
+            filaDestino = filaDestino + cantidad
+        End If
+    Next filaInicio
+
