@@ -1,0 +1,122 @@
+Option Explicit
+'ThisWorkbook versión 4: sustituir todo el contenido anterior de ThisWorkbook.
+'Usar con Modulo-4-v4.txt. Sin capturas al seleccionar ni preparación masiva al abrir.
+Private menuPendiente As Worksheet
+
+Private Sub Workbook_Open()
+    Set menuPendiente = Nothing
+    On Error GoTo Fallo
+    RestablecerProteccionAlAbrir
+    Exit Sub
+Fallo:
+    MsgBox "No se pudo restaurar la protección al abrir. No edite ni guarde hasta corregirlo: " & Err.Description, vbCritical
+End Sub
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    Dim ws As Worksheet, eventosAnteriores As Boolean, pantallaAnterior As Boolean, detalleError As String
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    Set ws = Sh
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    If RecuperarMantenimientoInterrumpido(ws) Then GoTo Salida
+    If EsHojaTecnica(ws.Name) And Not EstaEnMantenimiento(ws) Then GoTo Salida
+    'La decisión precede a cualquier validación o recuperación automática de fórmulas.
+    If EstaEnMantenimiento(ws) Then GestionarCambioMantenimiento ws, Target
+    If Not EsHojaTecnica(ws.Name) Then
+        ActualizarEntradaEnHoja ws, Target
+        ActualizarRespaldoDespuesDeEntrada ws, Target
+    End If
+Salida:
+    On Error Resume Next
+    Err.Clear
+    Application.ScreenUpdating = pantallaAnterior
+    If Err.Number <> 0 Then detalleError = detalleError & " No se restauró la pantalla: " & Err.Description
+    Err.Clear
+    Application.EnableEvents = eventosAnteriores
+    If Err.Number <> 0 Then detalleError = detalleError & " No se restauraron los eventos: " & Err.Description
+    On Error GoTo 0
+    If detalleError <> "" Then MsgBox "No se completó la actualización: " & detalleError, vbCritical
+    Exit Sub
+Fallo:
+    detalleError = Err.Description
+    Resume Salida
+End Sub
+
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    Dim eventosAnteriores As Boolean, pantallaAnterior As Boolean, errores As Long, detalleError As String
+    Set menuPendiente = Nothing
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    'Finalizar incluso si una validación bloquea este intento de guardar.
+    FinalizarMantenimiento
+    RestablecerProteccionAlAbrir
+    If Not Cancel Then
+        errores = ValidarTodasLasHojasTrabajo(Me)
+        If errores > 0 Then Cancel = True
+    End If
+Salida:
+    On Error Resume Next
+    Err.Clear
+    Application.ScreenUpdating = pantallaAnterior
+    If Err.Number <> 0 Then detalleError = detalleError & " No se restauró la pantalla: " & Err.Description
+    Err.Clear
+    Application.EnableEvents = eventosAnteriores
+    If Err.Number <> 0 Then detalleError = detalleError & " No se restauraron los eventos: " & Err.Description
+    On Error GoTo 0
+    If detalleError <> "" Then
+        Cancel = True
+        MsgBox "Guardado bloqueado: " & detalleError, vbCritical
+    ElseIf errores > 0 Then
+        MsgBox "No es posible guardar: hay " & errores & " celdas inválidas. Corrija los datos marcados en rojo. El mantenimiento ya finalizó.", vbExclamation
+    End If
+    Exit Sub
+Fallo:
+    Cancel = True
+    detalleError = Err.Description
+    Resume Salida
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    Dim eventosAnteriores As Boolean, detalle As String
+    Set menuPendiente = Nothing
+    eventosAnteriores = Application.EnableEvents
+    On Error GoTo Fallo
+    Application.EnableEvents = False
+    FinalizarMantenimiento
+Salida:
+    Application.EnableEvents = eventosAnteriores
+    If detalle <> "" Then MsgBox "No se pudo finalizar el mantenimiento antes de cerrar: " & detalle, vbCritical
+    Exit Sub
+Fallo:
+    Cancel = True
+    detalle = Err.Description
+    Resume Salida
+End Sub
+
+Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)
+    Set menuPendiente = Nothing
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    If UCase(Trim(Sh.Name)) = "MENU" Or UCase(Trim(Sh.Name)) = "MENÚ" Then Set menuPendiente = Sh
+End Sub
+
+Private Sub Workbook_SheetActivate(ByVal Sh As Object)
+    Dim origen As Worksheet
+    On Error GoTo Fallo
+    Set origen = menuPendiente
+    Set menuPendiente = Nothing
+    If origen Is Nothing Then Exit Sub
+    If Sh Is origen Then Exit Sub
+    If Not (ActiveWorkbook Is Me) Then Exit Sub
+    AvisarSalidaMenu origen
+    Exit Sub
+Fallo:
+    Set menuPendiente = Nothing
+    MsgBox "No se completó el aviso de salida de MENÚ: " & Err.Description, vbCritical
+End Sub
+
+Private Sub Workbook_Deactivate()
+    'Cambiar a otro libro o ventana no es cambiar de pestaña dentro de este libro.
+    Set menuPendiente = Nothing
+End Sub
