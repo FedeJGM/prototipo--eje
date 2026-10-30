@@ -1,0 +1,2240 @@
+Option Explicit
+'Nueva macro EliminarUltimaFilaMenu. Corrección de orden: primero contraseña, después validaciones de nueva fila y plantilla.
+'Módulo 4 integrado. Sustituir el módulo completo; no añadir a las partes anteriores.
+'Versión 6: conservar ThisBook-v4.txt sin cambios. Compilar/probar en una COPIA de Excel.
+'Entradas A:G y U:V desde fila 12; H calculada, no importada.
+'Ejecutar una vez ProtegerTodasLasHojasTrabajo para corregir los bloqueos existentes.
+'No se garantiza rendimiento sin medir el libro real; las macros no son una barrera de seguridad.
+'La clave original se conserva una sola vez. No duplicarla en otro módulo.
+Public Const CLAVE_HOJA As String = "GPT2026"
+Private Const PRIMERA_FILA As Long = 12
+Private Const TAMANO_BLOQUE As Long = 10000
+Private hojaMantenimiento As Worksheet
+Private respaldoMantenimiento As Workbook
+Private hojaCuentasMenu As Worksheet
+Private Const PREFIJO_CONSERVAR As String = "_NeteoV3_Conservar_"
+
+Sub ValidarTodo_ReglasNegocio()
+    Dim errores As Long
+    On Error GoTo Fallo
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    If EsHojaTecnica(ActiveSheet.Name) Then Exit Sub
+    errores = ValidarHojaTrabajo(ActiveSheet)
+    If errores = 0 Then
+        MsgBox "Validación finalizada sin errores.", vbInformation
+    Else
+        MsgBox "Se encontraron " & errores & " celdas inválidas, marcadas en rojo.", vbExclamation
+    End If
+    Exit Sub
+Fallo:
+    MsgBox "No se completó la validación: " & Err.Description, vbCritical
+End Sub
+
+Sub LimpiarColoresZonaEditable(ByVal ws As Worksheet)
+    Dim col As Variant, ultima As Long
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    ultima = ObtenerUltimaFilaEntrada(ws)
+    If ultima < PRIMERA_FILA Then Exit Sub
+    For Each col In Array("A", "B", "C", "D", "E", "F", "G", "U", "V")
+        QuitarRojoEnRango ws.Range(col & PRIMERA_FILA & ":" & col & ultima)
+    Next col
+End Sub
+
+Function ExistenErroresMarcadosEnRojo(ByVal ws As Worksheet) As Boolean
+    'Compatibilidad: decide por reglas, no por colores que el usuario puede cambiar.
+    ExistenErroresMarcadosEnRojo = (ValidarHojaTrabajo(ws) > 0)
+End Function
+
+Function EsCodigoOficinaValido(ByVal valor As Variant) As Boolean
+    Dim numero As Double
+    If IsError(valor) Or IsNull(valor) Then Exit Function
+    If Not IsNumeric(valor) Then Exit Function
+    numero = CDbl(valor)
+    If numero < 1 Or numero > 999 Then Exit Function
+    EsCodigoOficinaValido = (numero = Fix(numero))
+End Function
+
+Function EsFechaOrigenPartidaValida(ByVal celda As Range) As Boolean
+    EsFechaOrigenPartidaValida = FechaEntradaValida(celda.Value2, celda.Parent.Parent.Date1904)
+End Function
+
+Function EsTipoClienteValido(ByVal valor As Variant) As Boolean
+
+    Dim texto As String
+
+    EsTipoClienteValido = False
+
+    texto = LimpiarTextoValidacion(valor)
+
+    If texto = "CLIENTES" Or texto = "RED" Or texto = "Clientes" Or texto = "Red" Then
+        EsTipoClienteValido = True
+    End If
+
+End Function
+
+Function EsNitValido(ByVal valor As Variant) As Boolean
+
+    Dim texto As String
+    Dim i As Long
+
+    EsNitValido = False
+
+    If IsError(valor) Then Exit Function
+
+    texto = Trim(CStr(valor))
+
+    'Si NIT no puede estar vacío si la fila tiene datos'
+    If texto = "" Then Exit Function
+
+    'Quitar espacios internos por seguridad'
+    texto = Replace(texto, " ", "")
+
+    'No permitir decimales, letras, guiones ni caracteres especiales'
+    For i = 1 To Len(texto)
+        If Mid(texto, i, 1) < "0" Or Mid(texto, i, 1) > "9" Then
+            Exit Function
+        End If
+    Next i
+
+    'Longitud razonable del NIT'
+    If Len(texto) < 1 Or Len(texto) > 100 Then Exit Function
+
+    EsNitValido = True
+
+End Function
+
+Function EsNombreClienteValido(ByVal valor As Variant) As Boolean
+
+    Dim texto As String
+
+    EsNombreClienteValido = False
+
+    If IsError(valor) Then Exit Function
+
+    texto = Trim(CStr(valor))
+
+    If texto = "" Then Exit Function
+
+    EsNombreClienteValido = True
+
+End Function
+
+Function EsOficinaReclasificacionValida(ByVal valor As Variant) As Boolean
+
+    Dim texto As String
+
+    EsOficinaReclasificacionValida = False
+
+    If IsError(valor) Then Exit Function
+
+    texto = Trim(CStr(valor))
+
+    If texto = "" Then Exit Function
+
+    texto = Replace(texto, " ", "")
+    texto = Replace(texto, Chr(160), "")
+
+    If texto = "977" Or texto = "979" Or texto = "995" Then
+        EsOficinaReclasificacionValida = True
+    End If
+
+End Function
+
+Function EsDescripcionPartidaValida(ByVal valor As Variant) As Boolean
+
+    Dim texto As String
+
+    EsDescripcionPartidaValida = False
+
+    If IsError(valor) Then Exit Function
+
+    texto = Trim(CStr(valor))
+
+    If texto = "" Then Exit Function
+
+    EsDescripcionPartidaValida = True
+
+End Function
+
+Function EsValorPartidaValido(ByVal celda As Range) As Boolean
+    If celda Is Nothing Then Exit Function
+    EsValorPartidaValido = ValorEntradaValido(celda.Value2, celda.Formula)
+End Function
+
+Function LimpiarTextoValidacion(ByVal valor As Variant) As String
+
+    Dim texto As String
+
+    If IsError(valor) Then
+        LimpiarTextoValidacion = ""
+        Exit Function
+    End If
+
+    texto = CStr(valor)
+
+    'Limpiar espacios normale, espacios invisibles y saltos de linea'
+    texto = Replace(texto, Chr(160), "")
+    texto = Replace(texto, vbCr, "")
+    texto = Replace(texto, vbLf, "")
+
+    'Quitar espacios al inicio y al final'
+    texto = Trim(texto)
+
+    Do While InStr(texto, " ") > 0
+        texto = Replace(texto, " ", "")
+    Loop
+
+    LimpiarTextoValidacion = UCase(texto)
+
+End Function
+
+Sub LimpiarValidacionesEntradaHojaActiva()
+    Dim ws As Worksheet, ultima As Long, protegida As Boolean
+    Dim eventosAnteriores As Boolean, pantallaAnterior As Boolean, errorNumero As Long, errorDescripcion As String
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    Set ws = ActiveSheet
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    ultima = Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    protegida = ws.ProtectContents
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False
+    If protegida Then ws.Unprotect Password:=CLAVE_HOJA
+    ws.Range("A12:H" & ultima).Validation.Delete
+    ws.Range("U12:V" & ultima).Validation.Delete
+Salida:
+    RestaurarEstadoHoja ws, protegida, eventosAnteriores, pantallaAnterior, errorNumero, errorDescripcion
+    Exit Sub
+Fallo:
+    errorNumero = Err.Number: errorDescripcion = Err.Description
+    Resume Salida
+End Sub
+
+Sub ConfigurarValidacionesEntradaHojaActiva()
+    On Error GoTo Fallo
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    ConfigurarValidacionesEntradaEnHoja ActiveSheet
+    MsgBox "Configuración terminada. Pruebe en una copia antes de usar el libro.", vbInformation
+    Exit Sub
+Fallo:
+    MsgBox "No se completó la configuración: " & Err.Description, vbCritical
+End Sub
+
+Function ConfigurarCodigoOficina(ByVal ws As Worksheet) As Boolean
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    ConfigurarReglaEnRango ws, "A", PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    ConfigurarCodigoOficina = True
+End Function
+
+Function ConfigurarFechaOrigenPartida(ByVal ws As Worksheet) As Boolean
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    ConfigurarReglaEnRango ws, "B", PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    ConfigurarFechaOrigenPartida = True
+End Function
+
+Function ConfigurarTipoCliente(ByVal ws As Worksheet) As Boolean
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    ConfigurarReglaEnRango ws, "G", PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    ConfigurarTipoCliente = True
+End Function
+
+Function ConfigurarOficinaReclasificacion(ByVal ws As Worksheet) As Boolean
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    ConfigurarReglaEnRango ws, "U", PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    ConfigurarOficinaReclasificacion = True
+End Function
+
+Function ConfigurarValorPartida(ByVal ws As Worksheet) As Boolean
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    ConfigurarReglaEnRango ws, "F", PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    ConfigurarValorPartida = True
+End Function
+
+Sub ConfigurarValidacionesEntradaEnHoja(ByVal ws As Worksheet)
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    ConfigurarBloqueoHoja ws
+    PrepararFilasEntrada ws, PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    CompletarFormulasZonaGris ws, PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+End Sub
+
+Sub RestaurarValidacionesBasicasEnHoja(ByVal ws As Worksheet)
+    'Compatibilidad para configuración manual. El nuevo evento debe usar ActualizarEntradaEnHoja.
+    ConfigurarValidacionesEntradaEnHoja ws
+End Sub
+
+Function EsPartidaReclasificarValida(ByVal valor As Variant) As Boolean
+
+    Dim texto As String
+
+    EsPartidaReclasificarValida = False
+    If IsError(valor) Then Exit Function
+
+    texto = LimpiarTextoValidacion(valor)
+
+    'V es obligatoria en las filas con datos.'
+    If texto = "SÍ" Or texto = "NO" Then
+        EsPartidaReclasificarValida = True
+    End If
+
+End Function
+
+Function ConfigurarPartidaReclasificar(ByVal ws As Worksheet) As Boolean
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    ConfigurarReglaEnRango ws, "V", PRIMERA_FILA, Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws))
+    ConfigurarPartidaReclasificar = True
+End Function
+
+Function ObtenerNitRed(ByVal nombreRed As Variant) As String
+
+    Dim red As String
+    red = LimpiarTextoValidacion(nombreRed)
+    Select Case red
+
+        Case "AMEXINTERNACIONAL"
+            ObtenerNitRed = "4001434464"
+
+        Case "REDEBAN"
+            ObtenerNitRed = "830070527"
+
+        Case "MASTERCARDINTERNACIONAL"
+            ObtenerNitRed = "830002631"
+
+        Case "MASTERCARDCOLOMBIAADMINISTRADORA"
+            ObtenerNitRed = "901010458"
+
+        Case "CREDIBANCOAMEX"
+            ObtenerNitRed = "860032909"
+
+        Case "CREDIBANCOVISA"
+            ObtenerNitRed = "860032909"
+
+        Case "VISAINTERNACIONAL"
+            ObtenerNitRed = "900878539"
+
+        Case "VISANACIONAL"
+            ObtenerNitRed = "900550459"
+
+        Case Else
+            ObtenerNitRed = ""
+
+    End Select
+End Function
+
+Function ObtenerOficinaRed(ByVal nombreRed As Variant) As String
+
+    Dim red As String
+    red = LimpiarTextoValidacion(nombreRed)
+
+    Select Case red
+
+        Case "AMEXINTERNACIONAL"
+            ObtenerOficinaRed = "979"
+
+        Case "REDEBAN"
+            ObtenerOficinaRed = "977"
+
+        Case "MASTERCARDINTERNACIONAL"
+            ObtenerOficinaRed = "977"
+
+        Case "MASTERCARDCOLOMBIAADMINISTRADORA"
+            ObtenerOficinaRed = "977"
+
+        Case "CREDIBANCOAMEX"
+            ObtenerOficinaRed = "979"
+
+        Case "CREDIBANCOVISA"
+            ObtenerOficinaRed = "995"
+
+        Case "VISAINTERNACIONAL"
+            ObtenerOficinaRed = "995"
+
+        Case "VISANACIONAL"
+            ObtenerOficinaRed = "995"
+
+        Case Else
+            ObtenerOficinaRed = ""
+
+    End Select
+End Function
+
+Function EsNombreRedCatalogo(ByVal valor As Variant) As Boolean
+
+    If ObtenerNitRed(valor) <> "" Then
+        EsNombreRedCatalogo = True
+    Else
+        EsNombreRedCatalogo = False
+    End If
+
+End Function
+
+Function EsNitRedCatalogo(ByVal valor As Variant) As Boolean
+
+    Dim nit As String
+    EsNitRedCatalogo = False
+
+    If IsError(valor) Then Exit Function
+
+    nit = Trim(CStr(valor))
+    nit = Replace(nit, " ", "")
+    nit = Replace(nit, Chr(160), "")
+
+    Select Case nit
+
+        Case "4001434464"
+            EsNitRedCatalogo = True
+
+        Case "830070527"
+            EsNitRedCatalogo = True
+
+        Case "830002631"
+            EsNitRedCatalogo = True
+
+        Case "901010458"
+            EsNitRedCatalogo = True
+
+        Case "860032909"
+            EsNitRedCatalogo = True
+
+        Case "900878539"
+            EsNitRedCatalogo = True
+
+        Case "900550459"
+            EsNitRedCatalogo = True
+
+    End Select
+End Function
+
+Sub AplicarListaRedesEnCelda(ByVal celda As Range)
+    Dim lista As String
+    lista = "Amex Internacional,Redeban,Mastercard Internacional,Mastercard Colombia Administradora,Credibanco Amex,Credibanco Visa,Visa Internacional,Visa Nacional"
+    celda.Validation.Delete
+    With celda.Validation
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+            Formula1:=Replace(lista, ",", Application.International(xlListSeparator))
+        .IgnoreBlank = True: .InCellDropdown = True: .ShowError = True
+        .InputTitle = "Nombre de la Red"
+        .InputMessage = "Selecciona una Red de la lista"
+        .ShowInput = True
+        .ErrorTitle = "Red inválida": .ErrorMessage = "Seleccione una Red del catálogo."
+    End With
+End Sub
+
+Sub QuitarListaRedesEnCelda(ByVal celda As Range)
+    celda.Validation.Delete
+End Sub
+
+Sub ActualizarListaRedSegunTipoCliente(ByVal ws As Worksheet, ByVal Target As Range)
+    ActualizarEntradaEnHoja ws, Target
+End Sub
+
+Function FilaTieneDatosEntrada(ByVal ws As Worksheet, ByVal fila As Long) As Boolean
+
+    If Application.WorksheetFunction.CountA(ws.Range("A" & fila & ":G" & fila), ws.Range("U" & fila & ":V" & fila)) > 0 Then
+        FilaTieneDatosEntrada = True
+    Else
+        FilaTieneDatosEntrada = False
+    End If
+
+End Function
+
+Function ObtenerUltimaFilaEntrada(ByVal ws As Worksheet) As Long
+    Dim zona As Variant, celda As Range
+    For Each zona In Array("A12:G" & ws.Rows.Count, "U12:V" & ws.Rows.Count)
+        Set celda = ws.Range(zona).Find(What:="*", After:=ws.Range(zona).Cells(1, 1), _
+            LookIn:=xlValues, LookAt:=xlPart, SearchOrder:=xlByRows, _
+            SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+        If Not celda Is Nothing Then
+            If celda.Row > ObtenerUltimaFilaEntrada Then ObtenerUltimaFilaEntrada = celda.Row
+        End If
+    Next zona
+End Function
+
+Function ObtenerUltimaFilaParaRevision(ByVal ws As Worksheet) As Long
+    ObtenerUltimaFilaParaRevision = ObtenerUltimaFilaEntrada(ws)
+End Function
+
+Sub CrearNuevaHojaDesdePlantilla()
+    Dim wsMenu As Worksheet, wsPlantilla As Worksheet, wsNueva As Worksheet
+    Dim visibilidadOriginal As XlSheetVisibility, numeroNuevaHoja As Long, filaMenu As Long
+    Dim nombreNuevaHoja As String, detalleErrores As String, ultima As Long
+    Dim eventosAnteriores As Boolean, pantallaAnterior As Boolean, alertasAnteriores As Boolean
+    Dim errorDescripcion As String, visibilidadLeida As Boolean
+    Dim claveCreacion As String
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    alertasAnteriores = Application.DisplayAlerts
+    On Error GoTo Fallo
+    Set wsMenu = ObtenerHojaMenu()
+    If wsMenu Is Nothing Then Err.Raise 5, , "No se encontró MENÚ."
+    If RecuperarMantenimientoInterrumpido(wsMenu) Then Exit Sub
+    'La clave de creación no concede permisos de edición sobre MENÚ.
+    If Not MenuAutorizado(wsMenu) Then
+        claveCreacion = InputBox("Ingrese la contraseña para crear esta plantilla. Esta ventana muestra los caracteres escritos.", "Crear nueva plantilla")
+        If claveCreacion = "" Then Exit Sub
+        If claveCreacion <> CLAVE_HOJA Then
+            MsgBox "Contraseña incorrecta. No se creó ninguna plantilla.", vbExclamation
+            Exit Sub
+        End If
+    End If
+    claveCreacion = vbNullString
+    Set wsPlantilla = ObtenerHojaPlantilla()
+    If wsPlantilla Is Nothing Then Err.Raise 5, , "No se encontró PLANTILLA."
+    visibilidadOriginal = wsPlantilla.Visible: visibilidadLeida = True
+    numeroNuevaHoja = ContarHojasTrabajoCreadas() + 1
+    filaMenu = numeroNuevaHoja + 9
+    nombreNuevaHoja = "PLANTILLA " & Format(numeroNuevaHoja, "00")
+    If Not FilaMenuCompleta(wsMenu, filaMenu, detalleErrores) Then Err.Raise 5, , "MENÚ incompleto: " & detalleErrores
+    If ExisteHoja(nombreNuevaHoja) Then Err.Raise 5, , "Ya existe " & nombreNuevaHoja
+    VerificarModeloMenu wsMenu
+    If MsgBox("¿Crear " & nombreNuevaHoja & " desde la fila " & filaMenu & " de MENÚ?", vbYesNo + vbQuestion) <> vbYes Then Exit Sub
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    wsPlantilla.Visible = xlSheetVisible
+    wsPlantilla.Copy After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
+    Set wsNueva = ActiveSheet
+    wsNueva.Name = nombreNuevaHoja
+    wsNueva.Unprotect Password:=CLAVE_HOJA
+    AplicarFormulasEncabezadosDesdeMenu wsNueva, filaMenu
+    ultima = ObtenerUltimaFilaEntrada(wsNueva)
+    If ultima >= PRIMERA_FILA Then
+        wsNueva.Range("A12:G" & ultima).ClearContents
+        wsNueva.Range("U12:V" & ultima).ClearContents
+    End If
+    PrepararFilasEntrada wsNueva, PRIMERA_FILA, PRIMERA_FILA
+    CompletarFormulasZonaGris wsNueva, PRIMERA_FILA, PRIMERA_FILA
+    ConfigurarBloqueoHoja wsNueva
+    ProtegerHojaTrabajo wsNueva
+    VincularFilaMenu wsMenu, filaMenu, nombreNuevaHoja
+Salida:
+    On Error Resume Next
+    If visibilidadLeida Then wsPlantilla.Visible = visibilidadOriginal
+    Application.DisplayAlerts = alertasAnteriores
+    Application.ScreenUpdating = pantallaAnterior: Application.EnableEvents = eventosAnteriores
+    On Error GoTo 0
+    If errorDescripcion <> "" Then
+        MsgBox "No se completó la creación: " & errorDescripcion, vbCritical
+    Else
+        MsgBox "Hoja creada: " & nombreNuevaHoja, vbInformation
+    End If
+    Exit Sub
+Fallo:
+    errorDescripcion = Err.Description
+    On Error Resume Next
+    If Not wsNueva Is Nothing Then
+        Application.DisplayAlerts = False
+        Err.Clear: wsNueva.Delete
+        If Err.Number <> 0 Then
+            errorDescripcion = errorDescripcion & " No se eliminó la copia incompleta."
+            Err.Clear: ProtegerHojaTrabajo wsNueva
+            If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " No se pudo proteger la copia incompleta."
+        End If
+    End If
+    On Error GoTo 0
+    GoTo Salida
+End Sub
+
+Sub CopiarAnchosColumnas(ByVal wsOrigen As Worksheet, _
+                         ByVal wsDestino As Worksheet, _
+                         ByVal columnaInicial As Long, _
+                         ByVal columnaFinal As Long)
+
+    Dim col As Long
+
+    For col = columnaInicial To columnaFinal
+        wsDestino.Columns(col).ColumnWidth = wsOrigen.Columns(col).ColumnWidth
+    Next col
+
+End Sub
+
+Sub CopiarAlturasFilas(ByVal wsOrigen As Worksheet, _
+                       ByVal wsDestino As Worksheet, _
+                       ByVal filaInicial As Long, _
+                       ByVal filaFinal As Long)
+
+    Dim fila As Long
+
+    For fila = filaInicial To filaFinal
+        wsDestino.Rows(fila).RowHeight = wsOrigen.Rows(fila).RowHeight
+    Next fila
+
+End Sub
+
+Sub CopiarFormasZonaSuperior(ByVal wsOrigen As Worksheet, _
+                             ByVal wsDestino As Worksheet)
+
+    Dim shp As Shape
+    Dim nuevaForma As Shape
+    Dim rangoZona As Range
+
+    Set rangoZona = wsOrigen.Range("A1:U9")
+
+    For Each shp In wsOrigen.Shapes
+
+        If Not Intersect(shp.TopLeftCell, rangoZona) Is Nothing Then
+
+            shp.Copy
+            wsDestino.Paste
+
+            Set nuevaForma = wsDestino.Shapes(wsDestino.Shapes.Count)
+
+            nuevaForma.Top = shp.Top
+            nuevaForma.Left = shp.Left
+            nuevaForma.Width = shp.Width
+            nuevaForma.Height = shp.Height
+
+            'Conservar macro asignada si la forma tenía una macro'
+            On Error Resume Next
+            nuevaForma.OnAction = shp.OnAction
+            On Error GoTo 0
+
+        End If
+
+    Next shp
+
+End Sub
+
+Function ObtenerHojaPlantilla() As Worksheet
+
+    Dim wb As Workbook
+    Dim ws As Worksheet
+
+    Set ObtenerHojaPlantilla = Nothing
+    Set wb = ThisWorkbook
+
+    For Each ws In wb.Worksheets
+
+        If UCase(Trim(ws.Name)) = "PLANTILLA" Then
+            Set ObtenerHojaPlantilla = ws
+            Exit Function
+        End If
+
+    Next ws
+
+End Function
+
+Function ObtenerHojaMenu() As Worksheet
+
+    Dim wb As Workbook
+    Dim ws As Worksheet
+
+    Set ObtenerHojaMenu = Nothing
+    Set wb = ThisWorkbook
+
+    For Each ws In wb.Worksheets
+
+        If UCase(Trim(ws.Name)) = "MENÚ" Or _
+           UCase(Trim(ws.Name)) = "MENU" Then
+
+            Set ObtenerHojaMenu = ws
+            Exit Function
+        End If
+
+    Next ws
+
+End Function
+
+Function EsHojaTecnica(ByVal nombreHoja As String) As Boolean
+
+    Select Case UCase(Trim(nombreHoja))
+
+        Case "MENÚ", "MENU", "ALCON", "DATOS", "PLANTILLA"
+            EsHojaTecnica = True
+
+        Case Else
+            EsHojaTecnica = False
+
+    End Select
+End Function
+
+Function ContarHojasTrabajoCreadas() As Long
+
+    Dim ws As Worksheet
+    Dim contador As Long
+
+    contador = 0
+
+    For Each ws In ThisWorkbook.Worksheets
+
+        If Not EsHojaTecnica(ws.Name) Then
+            contador = contador + 1
+        End If
+
+    Next ws
+
+    ContarHojasTrabajoCreadas = contador
+
+End Function
+
+Function ExisteHoja(ByVal nombreHoja As String) As Boolean
+
+    Dim ws As Worksheet
+
+    ExisteHoja = False
+
+    For Each ws In ThisWorkbook.Worksheets
+
+        If UCase(ws.Name) = UCase(nombreHoja) Then
+            ExisteHoja = True
+            Exit Function
+        End If
+
+    Next ws
+
+End Function
+
+Function FilaMenuCompleta(ByVal wsMenu As Worksheet, ByVal filaMenu As Long, ByRef detalleErrores As String) As Boolean
+
+    Dim col As Long
+    Dim direccionCelda As String
+    Dim valorCelda As Variant
+
+    FilaMenuCompleta = True
+    detalleErrores = ""
+
+    'Columna C hasta la L'
+    For col = 3 To 12
+
+        direccionCelda = wsMenu.Cells(filaMenu, col).Address(False, False)
+
+        'Validar que la celda tenga fórmula'
+        If wsMenu.Cells(filaMenu, col).HasFormula = False Then
+
+            FilaMenuCompleta = False
+            detalleErrores = detalleErrores & "- " & direccionCelda & " no tiene fórmula." & vbCrLf
+
+        End If
+
+    Next col
+
+End Function
+
+Sub AplicarFormulasEncabezadosDesdeMenu(ByVal wsNueva As Worksheet, ByVal filaMenu As Long)
+    Dim menu As Worksheet, referencia As String
+    Set menu = ObtenerHojaMenu()
+    If menu Is Nothing Then Err.Raise 5, , "No existe MENÚ."
+    referencia = "='" & Replace(menu.Name, "'", "''") & "'!"
+    wsNueva.Range("B1").Formula = referencia & "I" & filaMenu
+    wsNueva.Range("B4").Formula = referencia & "A" & filaMenu
+    wsNueva.Range("B5").Formula = referencia & "B" & filaMenu
+    wsNueva.Range("B6").Formula = referencia & "C" & filaMenu
+    wsNueva.Range("B7").Formula = referencia & "H" & filaMenu
+    wsNueva.Range("B8").Formula = referencia & "J" & filaMenu
+    wsNueva.Range("B9").Formula = referencia & "D" & filaMenu
+    wsNueva.Range("F7").Formula = referencia & "E" & filaMenu
+    wsNueva.Range("G7").Formula = referencia & "F" & filaMenu
+End Sub
+
+Sub ImportarDatosDesdeArchivoExcel()
+    Dim wsDestino As Worksheet, celdaDestino As Range, wbOrigen As Workbook, libro As Workbook, rngOrigen As Range
+    Dim rngDestino As Range, rutaArchivo As Variant, filasOrigen As Long, columnasOrigen As Long
+    Dim filaFinal As Long, columnaFinal As Long, inicio As Long, cantidad As Long, errores As Long, filasEscritas As Long
+    Dim respaldo As Workbook, zonaRespaldo As Range, escrituraIniciada As Boolean, recuperado As Boolean
+    Dim cancelacionAnterior As XlEnableCancelKey, detalleRecuperacion As String
+    Dim protegida As Boolean, eventosAnteriores As Boolean, pantallaAnterior As Boolean
+    Dim seguridadAnterior As Long, errorNumero As Long, errorDescripcion As String, abiertoPorMacro As Boolean
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    Set wsDestino = ActiveSheet: Set celdaDestino = ActiveCell
+    If Not (wsDestino.Parent Is ThisWorkbook) Then Exit Sub
+    If EsHojaTecnica(wsDestino.Name) Then Exit Sub
+    If celdaDestino.Row < PRIMERA_FILA Or _
+        Not (celdaDestino.Column <= 7 Or (celdaDestino.Column >= 21 And celdaDestino.Column <= 22)) Then
+        MsgBox "Seleccione una celda editable de A:G o U:V, desde la fila 12.", vbExclamation
+        Exit Sub
+    End If
+    protegida = wsDestino.ProtectContents
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    seguridadAnterior = Application.AutomationSecurity
+    cancelacionAnterior = Application.EnableCancelKey
+    On Error GoTo Fallo
+    rutaArchivo = Application.GetOpenFilename( _
+        FileFilter:="Excel (*.xlsx;*.xlsm;*.xls),*.xlsx;*.xlsm;*.xls", Title:="Archivo del que desea importar valores")
+    If VarType(rutaArchivo) = vbBoolean Then GoTo Salida
+    For Each libro In Application.Workbooks
+        If StrComp(libro.FullName, CStr(rutaArchivo), vbTextCompare) = 0 Then
+            Set wbOrigen = libro
+            Exit For
+        End If
+    Next libro
+    Application.EnableEvents = False
+    If wbOrigen Is Nothing Then
+        Application.AutomationSecurity = 3
+        Set wbOrigen = Workbooks.Open(Filename:=CStr(rutaArchivo), UpdateLinks:=0, ReadOnly:=True)
+        abiertoPorMacro = True
+        Application.AutomationSecurity = seguridadAnterior
+    End If
+    If wbOrigen Is ThisWorkbook Then Err.Raise 5, , "No se puede importar desde este mismo libro."
+    wbOrigen.Activate
+    'Cancelar la selección no cambia los datos del destino.
+    On Error Resume Next
+    Set rngOrigen = Application.InputBox( _
+        Prompt:="Seleccione el rango de valores que desea copiar, sin reorganizar sus columnas.", _
+        Title:="Rango origen", Type:=8)
+    On Error GoTo Fallo
+    If rngOrigen Is Nothing Then GoTo Salida
+    If Not (rngOrigen.Parent.Parent Is wbOrigen) Then Err.Raise 5, , "Seleccione el rango del archivo origen elegido."
+    If rngOrigen.Areas.Count <> 1 Then Err.Raise 5, , "Seleccione un único rango rectangular."
+    If IsNull(rngOrigen.MergeCells) Then Err.Raise 5, , "El origen no puede contener celdas combinadas."
+    If rngOrigen.MergeCells Then Err.Raise 5, , "El origen no puede contener celdas combinadas."
+    filasOrigen = rngOrigen.Rows.Count: columnasOrigen = rngOrigen.Columns.Count
+    filaFinal = celdaDestino.Row + filasOrigen - 1
+    columnaFinal = celdaDestino.Column + columnasOrigen - 1
+    'Comprobar TODO el destino antes de pegar o preparar sus filas.
+    If filaFinal > wsDestino.Rows.Count Or columnaFinal > wsDestino.Columns.Count Then
+        Err.Raise 5, , "El rango no cabe en la hoja destino. No se importaron datos."
+    End If
+    If Not ((celdaDestino.Column <= 7 And columnaFinal <= 7) Or _
+        (celdaDestino.Column >= 21 And columnaFinal <= 22)) Then
+        Err.Raise 5, , "El rango invade celdas no editables. Debe caber completo en A:G o U:V. No se importaron datos."
+    End If
+    Set rngDestino = celdaDestino.Resize(filasOrigen, columnasOrigen)
+    If IsNull(rngDestino.MergeCells) Then Err.Raise 5, , "El destino no puede contener celdas combinadas."
+    If rngDestino.MergeCells Then Err.Raise 5, , "El destino no puede contener celdas combinadas."
+    If Application.CountA(rngDestino) > 0 Then
+        If MsgBox("Hay datos en el destino. ¿Reemplazarlos? Los vacíos del origen también borrarán datos.", _
+            vbYesNo + vbExclamation + vbDefaultButton2) <> vbYes Then GoTo Salida
+    End If
+    If Not hojaMantenimiento Is Nothing Then
+        If MsgBox("La importación finalizará el mantenimiento y conservará los cambios autorizados. ¿Continuar?", vbYesNo + vbQuestion + vbDefaultButton2) <> vbYes Then GoTo Salida
+    End If
+    FinalizarMantenimiento
+    Application.ScreenUpdating = False
+    Application.EnableCancelKey = xlErrorHandler
+    Set zonaRespaldo = wsDestino.Range("A" & celdaDestino.Row & ":V" & filaFinal)
+    If zonaRespaldo.CountLarge > 220000 Then
+        If MsgBox("Se respaldará A:V únicamente en las filas afectadas, incluidas las fórmulas y el autocompletado. Puede tardar. ¿Continuar?", vbYesNo + vbQuestion + vbDefaultButton2) <> vbYes Then GoTo Salida
+    End If
+    Set respaldo = CrearRespaldo()
+    VerificarContenidoRestaurable zonaRespaldo
+    CapturarContenido zonaRespaldo, respaldo
+    zonaRespaldo.Copy
+    respaldo.Worksheets(3).Range(zonaRespaldo.Address).PasteSpecial Paste:=xlPasteFormats
+    respaldo.Worksheets(3).Range(zonaRespaldo.Address).PasteSpecial Paste:=xlPasteValidation
+    Application.CutCopyMode = False
+    If protegida Then wsDestino.Unprotect Password:=CLAVE_HOJA
+    escrituraIniciada = True
+    For inicio = 1 To filasOrigen Step TAMANO_BLOQUE
+        cantidad = Application.Min(TAMANO_BLOQUE, filasOrigen - inicio + 1)
+        'Pegar valores conserva los textos literales; no copia fórmulas ni formatos.
+        rngOrigen.Cells(inicio, 1).Resize(cantidad, columnasOrigen).Copy
+        celdaDestino.Offset(inicio - 1).Resize(cantidad, columnasOrigen).PasteSpecial Paste:=xlPasteValues
+        filasEscritas = filasEscritas + cantidad
+    Next inicio
+    PrepararFilasEntrada wsDestino, celdaDestino.Row, filaFinal
+    CompletarFormulasZonaGris wsDestino, celdaDestino.Row, filaFinal
+    errores = ValidarHojaTrabajo(wsDestino, celdaDestino.Row, filaFinal)
+Salida:
+    On Error Resume Next
+    Application.EnableCancelKey = xlDisabled
+    If errorNumero <> 0 And escrituraIniciada Then
+        Err.Clear
+        wsDestino.Unprotect Password:=CLAVE_HOJA
+        RestaurarContenido zonaRespaldo, respaldo
+        If Err.Number = 0 Then
+            respaldo.Worksheets(3).Range(zonaRespaldo.Address).Copy
+            zonaRespaldo.PasteSpecial Paste:=xlPasteFormats
+            zonaRespaldo.PasteSpecial Paste:=xlPasteValidation
+        End If
+        If Err.Number = 0 Then
+            recuperado = True
+            errorDescripcion = errorDescripcion & vbCrLf & "Se recuperó el contenido anterior de las filas afectadas."
+        Else
+            detalleRecuperacion = Err.Description
+            errorDescripcion = errorDescripcion & vbCrLf & "La recuperación NO se completó: " & detalleRecuperacion & ". Se conserva el libro temporal abierto para rescatar los datos."
+        End If
+    ElseIf errorNumero <> 0 Then
+        If InStr(1, errorDescripcion, "No se importaron datos", vbTextCompare) = 0 Then errorDescripcion = errorDescripcion & " No se importaron datos."
+    End If
+    If Not respaldo Is Nothing Then
+        If Not escrituraIniciada Or errorNumero = 0 Or recuperado Then
+            Err.Clear: respaldo.Close SaveChanges:=False
+            If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " No se pudo cerrar el respaldo temporal: " & Err.Description
+        Else
+            respaldo.Windows(1).Visible = True
+        End If
+    End If
+    Application.CutCopyMode = False
+    If abiertoPorMacro Then
+        Err.Clear: wbOrigen.Close SaveChanges:=False
+        If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " No se pudo cerrar el archivo origen: " & Err.Description
+    End If
+    Err.Clear
+    wsDestino.Activate
+    If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " No se pudo volver al destino: " & Err.Description
+    Err.Clear
+    Application.AutomationSecurity = seguridadAnterior
+    If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " No se pudo restaurar la seguridad de apertura: " & Err.Description
+    Err.Clear
+    RestaurarEstadoHoja wsDestino, True, eventosAnteriores, pantallaAnterior, 0, ""
+    If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " " & Err.Description
+    Err.Clear
+    Application.EnableCancelKey = cancelacionAnterior
+    If Err.Number <> 0 Then errorDescripcion = errorDescripcion & " No se restauró la interrupción de teclado: " & Err.Description
+    On Error GoTo 0
+    If errorDescripcion <> "" Then
+        MsgBox "No se completó la importación: " & errorDescripcion, vbCritical
+    ElseIf filasEscritas > 0 Then
+        MsgBox "Importadas " & filasEscritas & " filas. Celdas inválidas: " & errores & ".", vbInformation
+    End If
+    Exit Sub
+Fallo:
+    errorNumero = Err.Number
+    errorDescripcion = Err.Description
+    Resume Salida
+End Sub
+
+Sub ProtegerTodasLasHojasTrabajo()
+    Dim ws As Worksheet
+    On Error GoTo Fallo
+    FinalizarMantenimiento
+    For Each ws In ThisWorkbook.Worksheets
+        If Not EsHojaTecnica(ws.Name) Or EsMenu(ws) Then ConfigurarBloqueoHoja ws
+    Next ws
+    MsgBox "Hojas protegidas. Entradas operativas: A:G y U:V desde fila 12. MENÚ: A:B desde fila 10. DATOS, ALCON y PLANTILLA no se modificaron.", vbInformation
+    Exit Sub
+Fallo:
+    MsgBox "No se completó la protección: " & Err.Description, vbCritical
+End Sub
+
+Sub ProtegerHojaTrabajo(ByVal ws As Worksheet)
+    If EsHojaTecnica(ws.Name) And Not EsMenu(ws) Then Exit Sub
+    ws.Protect Password:=CLAVE_HOJA, UserInterfaceOnly:=True, AllowFiltering:=True
+End Sub
+
+Private Sub RestaurarEstadoHoja(ByVal ws As Worksheet, ByVal protegida As Boolean, _
+    ByVal eventosAnteriores As Boolean, ByVal pantallaAnterior As Boolean, _
+    ByVal errorNumero As Long, ByVal errorDescripcion As String)
+    Dim errorProteccion As String
+    On Error Resume Next
+    If protegida Then
+        Err.Clear
+        ProtegerHojaTrabajo ws
+        If Err.Number <> 0 Then errorProteccion = " No se restauró la protección: " & Err.Description
+        If Not ws.ProtectContents Then errorProteccion = errorProteccion & " Hoja DESPROTEGIDA."
+    End If
+    Application.ScreenUpdating = pantallaAnterior
+    Application.EnableEvents = eventosAnteriores
+    On Error GoTo 0
+    If errorProteccion <> "" Then
+        Err.Raise vbObjectError + 1401, "RestaurarEstadoHoja", errorDescripcion & errorProteccion
+    End If
+    If errorNumero <> 0 Then Err.Raise errorNumero, "Modulo4", errorDescripcion
+End Sub
+
+Private Sub QuitarRojoEnRango(ByVal zona As Range)
+    Dim color As Variant, mitad As Long
+    color = zona.Interior.ColorIndex
+    If IsNull(color) Then
+        If zona.Rows.Count > 1 Then
+            mitad = zona.Rows.Count \ 2
+            QuitarRojoEnRango zona.Resize(mitad)
+            QuitarRojoEnRango zona.Offset(mitad).Resize(zona.Rows.Count - mitad)
+        End If
+    ElseIf zona.Interior.Color = RGB(255, 0, 0) Then
+        zona.Interior.ColorIndex = xlColorIndexNone
+    End If
+End Sub
+
+Private Function FechaEntradaValida(ByVal valor As Variant, ByVal fecha1904 As Boolean) As Boolean
+    Dim serial As Double
+    If IsError(valor) Or IsNull(valor) Then Exit Function
+    If Len(Trim(CStr(valor))) = 0 Then Exit Function
+    If IsNumeric(valor) Then
+        serial = CDbl(valor)
+        If fecha1904 Then serial = serial + 1462
+        FechaEntradaValida = (serial >= 1 And serial < CDbl(Date))
+    ElseIf IsDate(valor) Then
+        FechaEntradaValida = (DateValue(valor) < Date)
+    End If
+End Function
+
+Private Function ValorEntradaValido(ByVal valor As Variant, ByVal formula As Variant) As Boolean
+    Dim texto As String, i As Long, puntos As Long, caracter As String
+    If IsError(valor) Or IsError(formula) Then Exit Function
+    If IsNumeric(valor) And VarType(valor) <> vbString Then
+        If Left(CStr(formula), 1) = "=" Then Exit Function
+        ValorEntradaValido = (CDbl(valor) <> 0)
+        Exit Function
+    End If
+    texto = Replace(Replace(Trim(CStr(valor)), Chr(160), ""), " ", "")
+    If Left(texto, 1) = "-" Then texto = Mid(texto, 2)
+    If texto = "" Then Exit Function
+    If Left(texto, 1) = "." Or Right(texto, 1) = "." Then Exit Function
+    For i = 1 To Len(texto)
+        caracter = Mid(texto, i, 1)
+        If caracter = "." Then
+            puntos = puntos + 1
+            If puntos > 1 Then Exit Function
+        ElseIf caracter < "0" Or caracter > "9" Then
+            Exit Function
+        End If
+    Next i
+    ValorEntradaValido = (Val(texto) <> 0)
+End Function
+
+Private Function HayDatosEnFila(ByRef datos As Variant, ByRef adicionales As Variant, ByVal i As Long) As Boolean
+    Dim j As Long
+    For j = 1 To 7
+        If IsError(datos(i, j)) Then HayDatosEnFila = True: Exit Function
+        If Len(CStr(datos(i, j))) > 0 Then HayDatosEnFila = True: Exit Function
+    Next j
+    For j = 1 To 2
+        If IsError(adicionales(i, j)) Then HayDatosEnFila = True: Exit Function
+        If Len(CStr(adicionales(i, j))) > 0 Then HayDatosEnFila = True: Exit Function
+    Next j
+End Function
+
+Private Sub EscribirCambios(ByVal ws As Worksheet, ByVal columna As Long, ByVal inicio As Long, _
+    ByRef valores() As Variant, ByRef cambios() As Boolean, ByVal cantidad As Long)
+    Dim i As Long, primero As Long, j As Long, bloque() As Variant
+    i = 1
+    Do While i <= cantidad
+        If cambios(i) Then
+            primero = i
+            Do While i <= cantidad
+                If Not cambios(i) Then Exit Do
+                i = i + 1
+            Loop
+            ReDim bloque(1 To i - primero, 1 To 1)
+            For j = primero To i - 1
+                bloque(j - primero + 1, 1) = valores(j, 1)
+            Next j
+            ws.Cells(inicio + primero - 1, columna).Resize(i - primero).Value2 = bloque
+            If columna = 7 Then AplicarListaRedesEnCelda ws.Cells(inicio + primero - 1, 4).Resize(i - primero)
+        Else
+            i = i + 1
+        End If
+    Loop
+End Sub
+
+Private Sub MarcarErrores(ByVal ws As Worksheet, ByVal inicio As Long, ByVal cantidad As Long, ByRef malos() As Boolean)
+    Dim columnas As Variant, col As Long, i As Long, primero As Long
+    columnas = Array(1, 2, 3, 4, 5, 6, 7, 21, 22)
+    For col = 1 To 9
+        QuitarRojoEnRango ws.Cells(inicio, columnas(col - 1)).Resize(cantidad)
+        i = 1
+        Do While i <= cantidad
+            If malos(i, col) Then
+                primero = i
+                Do While i <= cantidad
+                    If Not malos(i, col) Then Exit Do
+                    i = i + 1
+                Loop
+                ws.Cells(inicio + primero - 1, columnas(col - 1)).Resize(i - primero).Interior.Color = RGB(255, 0, 0)
+            Else
+                i = i + 1
+            End If
+        Loop
+    Next col
+End Sub
+
+Private Function RevisarFilas(ByVal ws As Worksheet, ByVal primeraFila As Long, _
+    ByVal ultimaFila As Long, ByVal marcar As Boolean) As Long
+    Dim inicio As Long, cantidad As Long, i As Long, j As Long
+    Dim datos As Variant, extra As Variant, formulas As Variant
+    Dim malos() As Boolean, cambiaC() As Boolean, cambiaG() As Boolean, cambiaU() As Boolean
+    Dim nuevosC() As Variant, nuevosG() As Variant, nuevosU() As Variant
+    Dim nit As String, oficina As String, tipo As String, fecha1904 As Boolean
+    fecha1904 = ws.Parent.Date1904
+    For inicio = primeraFila To ultimaFila Step TAMANO_BLOQUE
+        cantidad = Application.Min(TAMANO_BLOQUE, ultimaFila - inicio + 1)
+        datos = ws.Cells(inicio, 1).Resize(cantidad, 7).Value2
+        extra = ws.Cells(inicio, 21).Resize(cantidad, 2).Value2
+        'Leer A:G mantiene una matriz incluso con una sola fila.
+        formulas = ws.Cells(inicio, 1).Resize(cantidad, 7).Formula
+        ReDim malos(1 To cantidad, 1 To 9)
+        ReDim cambiaC(1 To cantidad): ReDim cambiaG(1 To cantidad): ReDim cambiaU(1 To cantidad)
+        ReDim nuevosC(1 To cantidad, 1 To 1): ReDim nuevosG(1 To cantidad, 1 To 1): ReDim nuevosU(1 To cantidad, 1 To 1)
+        For i = 1 To cantidad
+            If HayDatosEnFila(datos, extra, i) Then
+                tipo = LimpiarTextoValidacion(datos(i, 7))
+                nit = ObtenerNitRed(datos(i, 4))
+                oficina = ObtenerOficinaRed(datos(i, 4))
+                If tipo = "CLIENTES" And nit <> "" Then
+                    If LimpiarTextoValidacion(datos(i, 3)) = nit And LimpiarTextoValidacion(extra(i, 1)) = oficina Then
+                        tipo = "RED": datos(i, 7) = "Red": cambiaG(i) = True: nuevosG(i, 1) = "Red"
+                    End If
+                End If
+                If tipo = "RED" Then
+                    If nit <> "" Then
+                        If LimpiarTextoValidacion(datos(i, 3)) <> nit Then
+                            datos(i, 3) = nit: cambiaC(i) = True: nuevosC(i, 1) = nit
+                        End If
+                        If LimpiarTextoValidacion(extra(i, 1)) <> oficina Then
+                            extra(i, 1) = oficina: cambiaU(i) = True: nuevosU(i, 1) = oficina
+                        End If
+                    Else
+                        malos(i, 4) = True
+                        If IsError(datos(i, 3)) Then
+                            cambiaC(i) = True
+                        Else
+                            cambiaC(i) = (Len(CStr(datos(i, 3))) > 0)
+                        End If
+                        If IsError(extra(i, 1)) Then
+                            cambiaU(i) = True
+                        Else
+                            cambiaU(i) = (Len(CStr(extra(i, 1))) > 0)
+                        End If
+                        datos(i, 3) = Empty: extra(i, 1) = Empty
+                    End If
+                Else
+                    malos(i, 4) = Not EsNombreClienteValido(datos(i, 4))
+                End If
+                malos(i, 1) = Not EsCodigoOficinaValido(datos(i, 1))
+                malos(i, 2) = Not FechaEntradaValida(datos(i, 2), fecha1904)
+                malos(i, 3) = Not EsNitValido(datos(i, 3))
+                malos(i, 5) = Not EsDescripcionPartidaValida(datos(i, 5))
+                malos(i, 6) = Not ValorEntradaValido(datos(i, 6), formulas(i, 6))
+                malos(i, 7) = Not EsTipoClienteValido(datos(i, 7))
+                malos(i, 8) = Not EsOficinaReclasificacionValida(extra(i, 1))
+                malos(i, 9) = Not EsPartidaReclasificarValida(extra(i, 2))
+                If tipo = "CLIENTES" Then
+                    If nit <> "" Then malos(i, 7) = True: malos(i, 4) = True
+                    If EsNitRedCatalogo(datos(i, 3)) Then malos(i, 7) = True: malos(i, 3) = True
+                End If
+                For j = 1 To 9
+                    If malos(i, j) Then RevisarFilas = RevisarFilas + 1
+                Next j
+            End If
+        Next i
+        EscribirCambios ws, 3, inicio, nuevosC, cambiaC, cantidad
+        EscribirCambios ws, 7, inicio, nuevosG, cambiaG, cantidad
+        EscribirCambios ws, 21, inicio, nuevosU, cambiaU, cantidad
+        If marcar Then MarcarErrores ws, inicio, cantidad, malos
+    Next inicio
+End Function
+
+Function ValidarHojaTrabajo(ByVal ws As Worksheet, Optional ByVal primeraFila As Long = 12, _
+    Optional ByVal ultimaFila As Long = 0, Optional ByVal marcar As Boolean = True) As Long
+    Dim protegida As Boolean, eventosAnteriores As Boolean, pantallaAnterior As Boolean
+    Dim errorNumero As Long, errorDescripcion As String, ultimaReal As Long
+    If EsHojaTecnica(ws.Name) Then Exit Function
+    If ultimaFila = 0 Then ultimaFila = ObtenerUltimaFilaEntrada(ws)
+    If primeraFila < PRIMERA_FILA Or ultimaFila > ws.Rows.Count Then Err.Raise 5, , "Rango de validación inválido."
+    If ultimaFila < primeraFila Then Exit Function
+    protegida = ws.ProtectContents
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    If protegida Then ws.Unprotect Password:=CLAVE_HOJA
+    ValidarHojaTrabajo = RevisarFilas(ws, primeraFila, ultimaFila, marcar)
+Salida:
+    RestaurarEstadoHoja ws, protegida, eventosAnteriores, pantallaAnterior, errorNumero, errorDescripcion
+    Exit Function
+Fallo:
+    errorNumero = Err.Number: errorDescripcion = ws.Name & ": " & Err.Description
+    Resume Salida
+End Function
+
+Function ValidarTodasLasHojasTrabajo(ByVal wb As Workbook) As Long
+    Dim ws As Worksheet
+    For Each ws In wb.Worksheets
+        If Not EsHojaTecnica(ws.Name) Then
+            ValidarTodasLasHojasTrabajo = ValidarTodasLasHojasTrabajo + ValidarHojaTrabajo(ws)
+        End If
+    Next ws
+End Function
+
+Private Sub ConfigurarReglaEnRango(ByVal ws As Worksheet, ByVal columna As String, ByVal primera As Long, ByVal ultima As Long)
+    Dim zona As Range, separador As String, lista As String
+    Set zona = ws.Range(columna & primera & ":" & columna & ultima)
+    separador = Application.International(xlListSeparator)
+    zona.Validation.Delete
+    With zona.Validation
+        Select Case columna
+            Case "A"
+                .Add Type:=xlValidateWholeNumber, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="1", Formula2:="999"
+                .InputTitle = "Código oficina"
+                .InputMessage = "Ingrese un número entre 1 y 999"
+                .ErrorMessage = "Ingrese un entero de 1 a 999."
+            Case "B"
+                .Add Type:=xlValidateDate, AlertStyle:=xlValidAlertStop, Operator:=xlLess, Formula1:="=TODAY()"
+                zona.NumberFormat = "dd/mm/yyyy"
+                .InputTitle = "Fecha origen partida"
+                .InputMessage = "Ingrese una fecha anterior al dia actual en formato Día/Mes/Año"
+                .ErrorMessage = "Ingrese una fecha anterior al día actual."
+            Case "G", "U", "V"
+                Select Case columna
+                    Case "G": lista = "Clientes,Red"
+                    Case "U": lista = "977,979,995"
+                    Case "V": lista = "Sí,No"
+                End Select
+                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:=Replace(lista, ",", separador)
+                .InCellDropdown = True
+                Select Case columna
+                    Case "G"
+                        .InputTitle = "Tipo Cliente"
+                        .InputMessage = "Seleccione Clientes o Red"
+                    Case "U"
+                        .InputTitle = "Oficina de Reclasificación"
+                        .InputMessage = "Seleccione una oficina válida:  977, 979 o 995"
+                    Case "V"
+                        .InputTitle = "Partida a reclasificar"
+                        .InputMessage = "Seleccione Sí o No. Este campo es obligatorio en las filas con datos."
+                End Select
+                .ErrorMessage = "Seleccione un valor permitido."
+            Case "F"
+                .Add Type:=xlValidateCustom, AlertStyle:=xlValidAlertStop, _
+                    Formula1:="=AND(ISNUMBER(F" & primera & "),F" & primera & "<>0)"
+                .InputTitle = "Valor partida"
+                .InputMessage = "Ingrese un valor numérico diferente de cero. Use punto para decimales."
+                .ErrorMessage = "Ingrese un número distinto de cero."
+        End Select
+        .IgnoreBlank = True: .ShowInput = True: .ShowError = True
+        .ErrorTitle = "Dato inválido"
+    End With
+End Sub
+
+Private Sub PrepararListasRed(ByVal ws As Worksheet, ByVal primera As Long, ByVal ultima As Long)
+    Dim inicio As Long, cantidad As Long, datos As Variant, i As Long, primero As Long, esRed As Boolean
+    For inicio = primera To ultima Step TAMANO_BLOQUE
+        cantidad = Application.Min(TAMANO_BLOQUE, ultima - inicio + 1)
+        datos = ws.Cells(inicio, 6).Resize(cantidad, 2).Value2
+        i = 1
+        Do While i <= cantidad
+            primero = i: esRed = (LimpiarTextoValidacion(datos(i, 2)) = "RED")
+            Do While i <= cantidad
+                If (LimpiarTextoValidacion(datos(i, 2)) = "RED") <> esRed Then Exit Do
+                i = i + 1
+            Loop
+            If esRed Then
+                AplicarListaRedesEnCelda ws.Cells(inicio + primero - 1, 4).Resize(i - primero)
+            Else
+                QuitarListaRedesEnCelda ws.Cells(inicio + primero - 1, 4).Resize(i - primero)
+            End If
+        Loop
+    Next inicio
+End Sub
+
+Sub PrepararFilasEntrada(ByVal ws As Worksheet, ByVal primeraFila As Long, ByVal ultimaFila As Long)
+    'Preparación explícita de filas nuevas/cambiadas. Nunca llamar para toda la hoja al abrir.
+    Dim protegida As Boolean, eventosAnteriores As Boolean, pantallaAnterior As Boolean
+    Dim errorNumero As Long, errorDescripcion As String, col As Variant, separador As String
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    If primeraFila < PRIMERA_FILA Or ultimaFila > ws.Rows.Count Or ultimaFila < primeraFila Then Err.Raise 5, , "Rango de preparación inválido."
+    protegida = ws.ProtectContents
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    If protegida Then ws.Unprotect Password:=CLAVE_HOJA
+    ws.Range("A" & primeraFila & ":G" & ultimaFila).Locked = False
+    ws.Range("U" & primeraFila & ":V" & ultimaFila).Locked = False
+    If Not EstaEnMantenimiento(ws) Then ws.Range("H" & primeraFila & ":T" & ultimaFila).Locked = True
+    ws.Range("C" & primeraFila & ":C" & ultimaFila).Validation.Delete
+    ws.Range("E" & primeraFila & ":E" & ultimaFila).Validation.Delete
+    ws.Range("H" & primeraFila & ":H" & ultimaFila).Validation.Delete
+    For Each col In Array("A", "B", "G", "U", "F", "V")
+        ConfigurarReglaEnRango ws, CStr(col), primeraFila, ultimaFila
+    Next col
+    CompletarColumnaCalculada ws, 8, primeraFila, ultimaFila
+    PrepararListasRed ws, primeraFila, ultimaFila
+Salida:
+    RestaurarEstadoHoja ws, protegida, eventosAnteriores, pantallaAnterior, errorNumero, errorDescripcion
+    Exit Sub
+Fallo:
+    errorNumero = Err.Number: errorDescripcion = Err.Description
+    Resume Salida
+End Sub
+
+Sub ActualizarEntradaEnHoja(ByVal ws As Worksheet, ByVal Target As Range)
+    'API para el futuro SheetChange: solo las filas afectadas, incluidos pegados y borrados.
+    Dim zona As Range, area As Range, primera As Long, ultima As Long, errores As Long, siguiente As Long
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    Set zona = Intersect(Target, Union(ws.Range("A12:G" & ws.Rows.Count), ws.Range("U12:V" & ws.Rows.Count)))
+    If zona Is Nothing Then Exit Sub
+    For Each area In zona.Areas
+        primera = area.Row: ultima = area.Row + area.Rows.Count - 1
+        errores = ValidarHojaTrabajo(ws, primera, ultima)
+        PrepararFilasEntrada ws, primera, ultima
+        CompletarFormulasZonaGris ws, primera, ultima
+    Next area
+    siguiente = ObtenerUltimaFilaEntrada(ws) + 1
+    If siguiente < PRIMERA_FILA Then siguiente = PRIMERA_FILA
+    If siguiente <= ws.Rows.Count Then PrepararFilasEntrada ws, siguiente, siguiente
+End Sub
+
+
+Private Sub ConfigurarBloqueoHoja(ByVal ws As Worksheet)
+    'Configuración manual inicial o creación de hoja. Nunca llamar por cada edición.
+    Dim eventosAnteriores As Boolean, pantallaAnterior As Boolean
+    Dim errorNumero As Long, errorDescripcion As String
+    If EsHojaTecnica(ws.Name) And Not EsMenu(ws) Then Exit Sub
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    ws.Unprotect Password:=CLAVE_HOJA
+    ws.Cells.Locked = True
+    If Not EsMenu(ws) Then
+        ws.Range("A12:G" & ws.Rows.Count).Locked = False
+        ws.Range("U12:V" & ws.Rows.Count).Locked = False
+    End If
+Salida:
+    RestaurarEstadoHoja ws, True, eventosAnteriores, pantallaAnterior, errorNumero, errorDescripcion
+    Exit Sub
+Fallo:
+    errorNumero = Err.Number: errorDescripcion = Err.Description
+    Resume Salida
+End Sub
+
+Private Sub CompletarFormulasZonaGris(ByVal ws As Worksheet, ByVal primera As Long, ByVal ultima As Long)
+    Dim columna As Long
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    If primera < PRIMERA_FILA Or ultima > ws.Rows.Count Or ultima < primera Then Err.Raise 5, , "Rango de fórmulas inválido."
+    For columna = 9 To 20
+        CompletarColumnaCalculada ws, columna, primera, ultima
+    Next columna
+End Sub
+
+
+Private Function EsMenu(ByVal ws As Worksheet) As Boolean
+    EsMenu = (UCase(Trim(ws.Name)) = "MENU" Or UCase(Trim(ws.Name)) = "MENÚ")
+End Function
+
+Function EstaEnMantenimiento(ByVal ws As Worksheet) As Boolean
+    If hojaMantenimiento Is Nothing Then Exit Function
+    EstaEnMantenimiento = (hojaMantenimiento Is ws)
+End Function
+
+Private Function ZonaCalculada(ByVal ws As Worksheet) As Range
+    If EsMenu(ws) Then
+        Set ZonaCalculada = Union(ws.Range("A1:L9"), ws.Range("C10:L" & ws.Rows.Count))
+    ElseIf Not EsHojaTecnica(ws.Name) Then
+        Set ZonaCalculada = Union(ws.Range("A1:V11"), ws.Range("H12:T" & ws.Rows.Count))
+    End If
+End Function
+
+Private Sub VerificarContenidoRestaurable(ByVal zona As Range, Optional ByVal permitirCombinadas As Boolean = False)
+    Dim estado As Variant, tabla As ListObject
+    If Not permitirCombinadas Then
+        estado = zona.MergeCells
+        If IsNull(estado) Then Err.Raise 5, , "El área contiene celdas combinadas; no se habilitará esta operación."
+        If estado Then Err.Raise 5, , "El área contiene celdas combinadas; no se habilitará esta operación."
+    End If
+    estado = zona.HasArray
+    If IsNull(estado) Then Err.Raise 5, , "El área contiene fórmulas matriciales; no se habilitará esta operación."
+    If estado Then Err.Raise 5, , "El área contiene fórmulas matriciales; no se habilitará esta operación."
+    'HasSpill no existe en versiones antiguas de Excel.
+    On Error Resume Next
+    Err.Clear
+    estado = CallByName(zona, "HasSpill", VbGet)
+    If Err.Number <> 0 Then estado = False
+    On Error GoTo 0
+    If IsNull(estado) Then Err.Raise 5, , "El área contiene fórmulas derramadas; no se habilitará esta operación."
+    If estado Then Err.Raise 5, , "El área contiene fórmulas derramadas; no se habilitará esta operación."
+    For Each tabla In zona.Parent.ListObjects
+        If Not Intersect(zona, tabla.Range) Is Nothing Then Err.Raise 5, , "El área pertenece a una tabla de Excel; no se habilitará esta operación."
+    Next tabla
+End Sub
+
+Private Function CrearRespaldo() As Workbook
+    Dim wb As Workbook
+    Set wb = Workbooks.Add(xlWBATWorksheet)
+    On Error GoTo Fallo
+    wb.Worksheets.Add After:=wb.Worksheets(wb.Worksheets.Count)
+    wb.Worksheets.Add After:=wb.Worksheets(wb.Worksheets.Count)
+    wb.Worksheets(1).Name = "Contenido"
+    wb.Worksheets(2).Name = "FormulasComoTexto"
+    wb.Worksheets(3).Name = "FormatoYValidacion"
+    wb.Windows(1).Visible = False
+    Set CrearRespaldo = wb
+    Exit Function
+Fallo:
+    Dim descripcion As String
+    descripcion = Err.Description
+    On Error Resume Next
+    wb.Close SaveChanges:=False
+    On Error GoTo 0
+    Err.Raise 5, , "No se pudo crear el respaldo temporal: " & descripcion
+End Function
+
+Private Function TextosLiterales(ByVal datos As Variant) As Variant
+    Dim f As Long, c As Long
+    'El apóstrofo impide que Excel evalúe como fórmula un texto que comienza con =.
+    If IsArray(datos) Then
+        For f = LBound(datos, 1) To UBound(datos, 1)
+            For c = LBound(datos, 2) To UBound(datos, 2)
+                If VarType(datos(f, c)) = vbString Then datos(f, c) = "'" & datos(f, c)
+            Next c
+        Next f
+    ElseIf VarType(datos) = vbString Then
+        datos = "'" & datos
+    End If
+    TextosLiterales = datos
+End Function
+
+Private Sub CapturarContenido(ByVal zona As Range, ByVal respaldo As Workbook)
+    Dim area As Range, bloque As Range, formulas As Range, parte As Range
+    Dim inicio As Long, cantidad As Long, limite As Long
+    Dim cabecera As Range, datos As Range, celda As Range, base As Range
+    limite = PRIMERA_FILA
+    If EsMenu(zona.Parent) Then limite = 10
+    For Each area In zona.Areas
+        Set cabecera = Intersect(area, area.Parent.Rows("1:" & (limite - 1)))
+        If Not cabecera Is Nothing Then
+            For Each celda In cabecera.Cells
+                Set base = celda
+                If celda.MergeCells Then Set base = celda.MergeArea.Cells(1, 1)
+                respaldo.Worksheets(1).Range(base.Address).Value2 = TextosLiterales(base.Value2)
+                respaldo.Worksheets(2).Range(base.Address).ClearContents
+                If base.HasFormula Then respaldo.Worksheets(2).Range(base.Address).Value2 = TextosLiterales(base.FormulaR1C1)
+            Next celda
+        End If
+        Set datos = Intersect(area, area.Parent.Rows(limite & ":" & area.Parent.Rows.Count))
+        If Not datos Is Nothing Then
+        For inicio = 1 To datos.Rows.Count Step TAMANO_BLOQUE
+            cantidad = Application.Min(TAMANO_BLOQUE, datos.Rows.Count - inicio + 1)
+            Set bloque = datos.Cells(inicio, 1).Resize(cantidad, datos.Columns.Count)
+            respaldo.Worksheets(1).Range(bloque.Address).Value2 = TextosLiterales(bloque.Value2)
+            respaldo.Worksheets(2).Range(bloque.Address).ClearContents
+            Set formulas = Nothing
+            If bloque.CountLarge = 1 Then
+                If bloque.HasFormula Then Set formulas = bloque
+            Else
+                On Error Resume Next
+                Set formulas = bloque.SpecialCells(xlCellTypeFormulas)
+                On Error GoTo 0
+            End If
+            If Not formulas Is Nothing Then Set formulas = Intersect(bloque, formulas)
+            If Not formulas Is Nothing Then
+                For Each parte In formulas.Areas
+                    respaldo.Worksheets(2).Range(parte.Address).Value2 = TextosLiterales(parte.FormulaR1C1)
+                Next parte
+            End If
+        Next inicio
+        End If
+    Next area
+End Sub
+
+Private Sub RestaurarContenido(ByVal zona As Range, ByVal respaldo As Workbook)
+    Dim area As Range, bloque As Range, formulas As Range, parte As Range, origen As Range
+    Dim inicio As Long, cantidad As Long, limite As Long
+    Dim cabecera As Range, datos As Range, celda As Range, base As Range
+    If respaldo Is Nothing Then Err.Raise 5, , "No existe un respaldo fiable para recuperar el contenido."
+    limite = PRIMERA_FILA
+    If EsMenu(zona.Parent) Then limite = 10
+    For Each area In zona.Areas
+        Set cabecera = Intersect(area, area.Parent.Rows("1:" & (limite - 1)))
+        If Not cabecera Is Nothing Then
+            For Each celda In cabecera.Cells
+                Set base = celda
+                If celda.MergeCells Then Set base = celda.MergeArea.Cells(1, 1)
+                If VarType(respaldo.Worksheets(2).Range(base.Address).Value2) = vbString Then
+                    base.FormulaR1C1 = respaldo.Worksheets(2).Range(base.Address).Value2
+                Else
+                    base.Value2 = TextosLiterales(respaldo.Worksheets(1).Range(base.Address).Value2)
+                End If
+            Next celda
+        End If
+        Set datos = Intersect(area, area.Parent.Rows(limite & ":" & area.Parent.Rows.Count))
+        If Not datos Is Nothing Then
+        For inicio = 1 To datos.Rows.Count Step TAMANO_BLOQUE
+            cantidad = Application.Min(TAMANO_BLOQUE, datos.Rows.Count - inicio + 1)
+            Set bloque = datos.Cells(inicio, 1).Resize(cantidad, datos.Columns.Count)
+            bloque.Value2 = TextosLiterales(respaldo.Worksheets(1).Range(bloque.Address).Value2)
+            Set origen = respaldo.Worksheets(2).Range(bloque.Address)
+            Set formulas = Nothing
+            If origen.CountLarge = 1 Then
+                If VarType(origen.Value2) = vbString Then Set formulas = origen
+            Else
+                On Error Resume Next
+                Set formulas = origen.SpecialCells(xlCellTypeConstants, xlTextValues)
+                On Error GoTo 0
+            End If
+            If Not formulas Is Nothing Then Set formulas = Intersect(origen, formulas)
+            If Not formulas Is Nothing Then
+                For Each parte In formulas.Areas
+                    zona.Parent.Range(parte.Address).FormulaR1C1 = parte.Value2
+                Next parte
+            End If
+        Next inicio
+        End If
+    Next area
+End Sub
+
+Sub DesbloquearHoja()
+    Dim ws As Worksheet, clave As String, accion As VbMsgBoxResult
+    Dim zona As Range, ultima As Range, area As Range, encontrada As Range, eventos As Boolean, pantalla As Boolean, detalle As String
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    Set ws = ActiveSheet
+    If Not (ws.Parent Is ThisWorkbook) Then Exit Sub
+    If EsHojaTecnica(ws.Name) And Not EsMenu(ws) Then
+        MsgBox "Esta opción no modifica DATOS, ALCON ni PLANTILLA.", vbExclamation
+        Exit Sub
+    End If
+    clave = InputBox("Ingrese la contraseña. Esta ventana muestra los caracteres escritos.", "Desbloquear hoja")
+    If clave = "" Then Exit Sub
+    If clave <> CLAVE_HOJA Then
+        MsgBox "Contraseña incorrecta.", vbExclamation
+        Exit Sub
+    End If
+    accion = MsgBox("Sí: Modificar CUENTA BV y CUENTA CUIF (solo A/B de MENÚ)." & vbCrLf & _
+        "No: Otra acción (mantenimiento del área funcional)." & vbCrLf & "Cancelar: no realizar cambios.", _
+        vbYesNoCancel + vbQuestion, "Acción autorizada")
+    If accion = vbCancel Then Exit Sub
+    If accion = vbYes And Not EsMenu(ws) Then
+        MsgBox "Para modificar CUENTA BV y CUENTA CUIF, ejecute esta macro desde MENÚ.", vbExclamation
+        Exit Sub
+    End If
+    eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    FinalizarMantenimiento
+    If accion = vbYes Then
+        If AutorizarCuentasMenu(ws, True) Then MsgBox "Edición de cuentas habilitada en A/B de MENÚ desde fila 10.", vbInformation
+        GoTo Salida
+    End If
+    Set zona = ZonaCalculada(ws)
+    For Each area In zona.Areas
+        Set encontrada = area.Find(What:="*", After:=area.Cells(1, 1), LookIn:=xlFormulas, LookAt:=xlPart, _
+            SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+        If Not encontrada Is Nothing Then
+            If ultima Is Nothing Then
+                Set ultima = encontrada
+            ElseIf encontrada.Row > ultima.Row Then
+                Set ultima = encontrada
+            End If
+        End If
+    Next area
+    If Not ultima Is Nothing Then
+        Set zona = Intersect(zona, ws.Rows("1:" & ultima.Row))
+        VerificarZonaMantenimiento ws, zona
+        If zona.CountLarge > 130000 Then
+            If MsgBox("Se respaldará la zona calculada utilizada antes de habilitar mantenimiento. Puede tardar y consumir memoria. ¿Continuar?", _
+                vbYesNo + vbQuestion + vbDefaultButton2) <> vbYes Then GoTo Salida
+        End If
+    End If
+    Set respaldoMantenimiento = CrearRespaldo()
+    If Not ultima Is Nothing Then CapturarContenido zona, respaldoMantenimiento
+    'Solo después del respaldo correcto se habilita el área funcional.
+    Set hojaMantenimiento = ws
+    ThisWorkbook.Names.Add Name:="_NeteoV3_Mantenimiento", RefersTo:="='" & Replace(ws.Name, "'", "''") & "'!$A$1", Visible:=False
+    ws.Unprotect Password:=CLAVE_HOJA
+    If EsMenu(ws) Then
+        ws.Range("A:L").Locked = False
+        ws.Range("M:XFD").Locked = True
+    Else
+        ws.Range("A:V").Locked = False
+        ws.Range("W:XFD").Locked = True
+    End If
+    ProtegerHojaTrabajo ws
+    MsgBox "Mantenimiento habilitado. Los cambios de la zona calculada preguntarán si desea conservarlos. Finalice con VolverAProtegerHoja.", vbInformation
+Salida:
+    On Error Resume Next
+    ws.Activate
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    On Error GoTo 0
+    Exit Sub
+Fallo:
+    detalle = Err.Description
+    On Error Resume Next
+    RestaurarBloqueoFuncional ws
+    FinalizarMantenimiento
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    On Error GoTo 0
+    MsgBox "No se habilitó el mantenimiento: " & detalle, vbCritical
+End Sub
+
+Private Sub RestaurarBloqueoFuncional(ByVal ws As Worksheet)
+    On Error GoTo Fallo
+    ws.Unprotect Password:=CLAVE_HOJA
+    If EsMenu(ws) Then
+        ws.Range("A:L").Locked = True
+        ws.Range("M:XFD").Locked = True
+    Else
+        ws.Range("W:XFD").Locked = True
+        ws.Range("A1:V11").Locked = True
+        ws.Range("H12:T" & ws.Rows.Count).Locked = True
+        ws.Range("A12:G" & ws.Rows.Count).Locked = False
+        ws.Range("U12:V" & ws.Rows.Count).Locked = False
+    End If
+    ProtegerHojaTrabajo ws
+    Exit Sub
+Fallo:
+    Dim descripcion As String
+    descripcion = Err.Description
+    On Error Resume Next
+    ProtegerHojaTrabajo ws
+    On Error GoTo 0
+    Err.Raise 5, , "No se restauraron todos los bloqueos de " & ws.Name & ": " & descripcion
+End Sub
+
+Sub FinalizarMantenimiento()
+    Dim marca As Name, marcaCuentas As Name
+    On Error Resume Next
+    Set marca = ThisWorkbook.Names("_NeteoV3_Mantenimiento")
+    Set marcaCuentas = ThisWorkbook.Names("_NeteoV4_Cuentas")
+    On Error GoTo 0
+    If hojaCuentasMenu Is Nothing And Not marcaCuentas Is Nothing Then Set hojaCuentasMenu = marcaCuentas.RefersToRange.Parent
+    If hojaMantenimiento Is Nothing And Not marca Is Nothing Then
+        Set hojaMantenimiento = marca.RefersToRange.Parent
+    End If
+    If Not hojaMantenimiento Is Nothing Then RestaurarBloqueoFuncional hojaMantenimiento
+    If Not hojaCuentasMenu Is Nothing Then RestaurarBloqueoFuncional hojaCuentasMenu
+    If Not marcaCuentas Is Nothing Then marcaCuentas.Delete
+    Set hojaCuentasMenu = Nothing
+    If Not marca Is Nothing Then marca.Delete
+    If Not respaldoMantenimiento Is Nothing Then respaldoMantenimiento.Close SaveChanges:=False
+    Set hojaMantenimiento = Nothing
+    Set respaldoMantenimiento = Nothing
+End Sub
+
+Sub VolverAProtegerHoja()
+    Dim ws As Worksheet
+    On Error GoTo Fallo
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    Set ws = ActiveSheet
+    If Not (ws.Parent Is ThisWorkbook) Then Exit Sub
+    If EsHojaTecnica(ws.Name) And Not EsMenu(ws) Then Exit Sub
+    FinalizarMantenimiento
+    RestaurarBloqueoFuncional ws
+    MsgBox "Hoja protegida. Los cambios autorizados se conservan.", vbInformation
+    Exit Sub
+Fallo:
+    MsgBox "No se completó la protección: " & Err.Description, vbCritical
+End Sub
+
+Sub RestablecerProteccionAlAbrir()
+    Dim ws As Worksheet
+    'Se repone UserInterfaceOnly sin rehacer bloqueos de todas las hojas.
+    FinalizarMantenimiento
+    For Each ws In ThisWorkbook.Worksheets
+        If EsMenu(ws) Then
+            RestaurarBloqueoFuncional ws
+        ElseIf Not EsHojaTecnica(ws.Name) Then
+            ProtegerHojaTrabajo ws
+        End If
+    Next ws
+End Sub
+
+Sub GestionarCambioMantenimiento(ByVal ws As Worksheet, ByVal Target As Range)
+    Dim zona As Range, respuesta As VbMsgBoxResult, detalle As String, cambioAutorizado As Boolean
+    If Not EstaEnMantenimiento(ws) Then Exit Sub
+    Set zona = Intersect(Target, ZonaCalculada(ws))
+    If zona Is Nothing Then Exit Sub
+    On Error GoTo Fallo
+    If respaldoMantenimiento Is Nothing Then Err.Raise 5, , "Se perdió el respaldo de mantenimiento."
+    respuesta = MsgBox("Se modificó " & Left(zona.Address(False, False), 180) & "." & vbCrLf & _
+        "Sí: Deseo conservar." & vbCrLf & "No: Deseo dejarlo como antes (solo la zona calculada y encabezados)." & vbCrLf & "Las entradas de un pegado mixto no se deshacen con esta decisión.", _
+        vbYesNo + vbQuestion + vbDefaultButton2, "Cambio en zona calculada")
+    If respuesta = vbNo Then
+        RestaurarContenido zona, respaldoMantenimiento
+    Else
+        VerificarZonaMantenimiento ws, zona
+        RegistrarVaciosConservados ws, zona
+        cambioAutorizado = True
+        'El siguiente cambio se compara con este estado, no con PLANTILLA.
+        CapturarContenido zona, respaldoMantenimiento
+    End If
+    Exit Sub
+Fallo:
+    detalle = Err.Description
+    On Error Resume Next
+    If Not cambioAutorizado And Not respaldoMantenimiento Is Nothing Then RestaurarContenido zona, respaldoMantenimiento
+    If Err.Number <> 0 Then
+        detalle = detalle & " No se recuperó todo el contenido: " & Err.Description & ". Se conserva el respaldo temporal abierto."
+        If Not respaldoMantenimiento Is Nothing Then respaldoMantenimiento.Windows(1).Visible = True
+        Set respaldoMantenimiento = Nothing
+    End If
+    Err.Clear
+    FinalizarMantenimiento
+    If Err.Number <> 0 Then detalle = detalle & " No se cerró el mantenimiento: " & Err.Description
+    On Error GoTo 0
+    Err.Raise 5, , "Mantenimiento suspendido: " & detalle
+End Sub
+
+Private Function ExcluirZona(ByVal zona As Range, ByVal quitar As Range) As Range
+    Dim area As Range, comun As Range, parte As Range, resultado As Range
+    Dim arriba As Long, abajo As Long, izquierda As Long, derecha As Long
+    For Each area In zona.Areas
+        Set comun = Intersect(area, quitar)
+        If comun Is Nothing Then
+            Set parte = area
+            If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+        Else
+            'quitar es un rectángulo; cada resta produce a lo sumo cuatro rectángulos.
+            arriba = area.Row: abajo = area.Row + area.Rows.Count - 1
+            izquierda = area.Column: derecha = area.Column + area.Columns.Count - 1
+            If comun.Row > arriba Then
+                Set parte = area.Parent.Range(area.Parent.Cells(arriba, izquierda), area.Parent.Cells(comun.Row - 1, derecha))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+            If comun.Row + comun.Rows.Count - 1 < abajo Then
+                Set parte = area.Parent.Range(area.Parent.Cells(comun.Row + comun.Rows.Count, izquierda), area.Parent.Cells(abajo, derecha))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+            If comun.Column > izquierda Then
+                Set parte = area.Parent.Range(area.Parent.Cells(comun.Row, izquierda), area.Parent.Cells(comun.Row + comun.Rows.Count - 1, comun.Column - 1))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+            If comun.Column + comun.Columns.Count - 1 < derecha Then
+                Set parte = area.Parent.Range(area.Parent.Cells(comun.Row, comun.Column + comun.Columns.Count), area.Parent.Cells(comun.Row + comun.Rows.Count - 1, derecha))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+        End If
+    Next area
+    Set ExcluirZona = resultado
+End Function
+
+Private Sub AgregarExcepcion(ByVal zona As Range)
+    Dim parte As Range, numero As Long, nombre As String, existente As Name
+    For Each parte In zona.Areas
+        numero = ThisWorkbook.Names.Count + 1
+        Do
+            nombre = PREFIJO_CONSERVAR & CStr(numero)
+            Set existente = Nothing
+            On Error Resume Next
+            Set existente = ThisWorkbook.Names(nombre)
+            On Error GoTo 0
+            If existente Is Nothing Then Exit Do
+            numero = numero + 1
+        Loop
+        ThisWorkbook.Names.Add Name:=nombre, RefersTo:="='" & Replace(zona.Parent.Name, "'", "''") & "'!" & parte.Address, Visible:=False
+    Next parte
+End Sub
+
+Private Sub RegistrarVaciosConservados(ByVal ws As Worksheet, ByVal zona As Range)
+    Dim nombre As Name, anterior As Range, area As Range, vacias As Range
+    For Each area In zona.Areas
+        Set vacias = Nothing
+        If area.CountLarge = 1 Then
+            If Not area.HasFormula And IsEmpty(area.Value2) Then Set vacias = area
+        Else
+            On Error Resume Next
+            Set vacias = area.SpecialCells(xlCellTypeBlanks)
+            On Error GoTo 0
+            If Not vacias Is Nothing Then Set vacias = Intersect(area, vacias)
+        End If
+        'No eliminar excepciones previas: un fallo no puede borrar decisiones anteriores.
+        If Not vacias Is Nothing Then
+            For Each nombre In ThisWorkbook.Names
+                If InStr(1, nombre.Name, PREFIJO_CONSERVAR, vbTextCompare) > 0 Then
+                    Set anterior = Nothing
+                    On Error Resume Next
+                    Set anterior = nombre.RefersToRange
+                    On Error GoTo 0
+                    If Not anterior Is Nothing Then
+                        If anterior.Parent Is ws Then
+                            Set vacias = ExcluirZona(vacias, anterior)
+                            If vacias Is Nothing Then Exit For
+                        End If
+                    End If
+                End If
+            Next nombre
+        End If
+        If Not vacias Is Nothing Then AgregarExcepcion vacias
+    Next area
+End Sub
+
+Private Sub CompletarColumnaCalculada(ByVal ws As Worksheet, ByVal columna As Long, ByVal primera As Long, ByVal ultima As Long)
+    Dim inicio As Long, cantidad As Long, zona As Range, vacias As Range, area As Range, exceptuada As Range
+    Dim nombre As Name, modelo As Worksheet, separador As String
+    Set modelo = ObtenerHojaPlantilla()
+    For inicio = primera To ultima Step TAMANO_BLOQUE
+        cantidad = Application.Min(TAMANO_BLOQUE, ultima - inicio + 1)
+        Set zona = ws.Cells(inicio, columna).Resize(cantidad)
+        Set vacias = Nothing
+        If cantidad = 1 Then
+            If Not zona.HasFormula And IsEmpty(zona.Value2) Then Set vacias = zona
+        Else
+            On Error Resume Next
+            Set vacias = zona.SpecialCells(xlCellTypeBlanks)
+            On Error GoTo 0
+            If Not vacias Is Nothing Then Set vacias = Intersect(zona, vacias)
+        End If
+        If Not vacias Is Nothing Then
+            For Each nombre In ThisWorkbook.Names
+                If InStr(1, nombre.Name, PREFIJO_CONSERVAR, vbTextCompare) > 0 Then
+                    Set exceptuada = Nothing
+                    On Error Resume Next
+                    Set exceptuada = nombre.RefersToRange
+                    On Error GoTo 0
+                    If Not exceptuada Is Nothing Then
+                        If exceptuada.Parent Is ws Then
+                            Set vacias = ExcluirZona(vacias, exceptuada)
+                            If vacias Is Nothing Then Exit For
+                        End If
+                    End If
+                End If
+            Next nombre
+        End If
+        If Not vacias Is Nothing Then
+            For Each area In vacias.Areas
+                If columna = 8 Then
+                    separador = Application.International(xlListSeparator)
+                    area.Cells(1, 1).FormulaLocal = Replace("=SI(B" & area.Row & "=0, """", SUMA($B$2-B" & area.Row & "))", ",", separador)
+                    If area.Rows.Count > 1 Then area.FillDown
+                Else
+                    If modelo Is Nothing Then Err.Raise 5, , "No se encontró PLANTILLA."
+                    If Not modelo.Cells(PRIMERA_FILA, columna).HasFormula Then Err.Raise 5, , "Falta una fórmula modelo de PLANTILLA en la columna " & columna
+                    area.FormulaR1C1 = modelo.Cells(PRIMERA_FILA, columna).FormulaR1C1
+                End If
+            Next area
+        End If
+    Next inicio
+End Sub
+
+Sub AgregarFilaMenu()
+    Dim ws As Worksheet, ultimo As Range, fila As Long, eventos As Boolean, pantalla As Boolean, detalle As String
+    Dim claveFila As String, claveComprobada As Boolean
+    Set ws = ObtenerHojaMenu()
+    If ws Is Nothing Then
+        MsgBox "No se encontró MENÚ.", vbExclamation
+        Exit Sub
+    End If
+    If RecuperarMantenimientoInterrumpido(ws) Then Exit Sub
+    'Comprobar la clave antes de revisar datos o fórmulas, sin habilitar aún A/B.
+    If Not MenuAutorizado(ws) Then
+        claveFila = InputBox("Ingrese la contraseña para agregar filas y editar las cuentas. Esta ventana muestra los caracteres escritos.", "Autorizar MENÚ")
+        If claveFila = "" Then Exit Sub
+        If claveFila <> CLAVE_HOJA Then
+            MsgBox "Contraseña incorrecta. No se modificó MENÚ.", vbExclamation
+            Exit Sub
+        End If
+        claveComprobada = True
+    End If
+    claveFila = vbNullString
+    Set ultimo = ws.Range("A10:B" & ws.Rows.Count).Find(What:="*", After:=ws.Range("A10"), _
+        LookIn:=xlFormulas, LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+    fila = 10
+    If Not ultimo Is Nothing Then fila = ultimo.Row + 1
+    If fila > ws.Rows.Count Then
+        MsgBox "No hay espacio para otra fila en MENÚ.", vbExclamation
+        Exit Sub
+    End If
+    'Verificar el modelo ANTES de cambiar una celda de MENÚ.
+    If Not ws.Range("K10").HasFormula Or Not ws.Range("L10").HasFormula Then
+        MsgBox "Faltan las fórmulas modelo K10/L10 de MENÚ.", vbExclamation
+        Exit Sub
+    End If
+    If InStr(1, ws.Range("K10").Formula, "PLANTILLA 01", vbTextCompare) = 0 Or _
+        InStr(1, ws.Range("L10").Formula, "PLANTILLA 01", vbTextCompare) = 0 Then
+        MsgBox "Las fórmulas modelo K10/L10 deben conservar su referencia a PLANTILLA 01. Revise el modelo antes de agregar filas.", vbExclamation
+        Exit Sub
+    End If
+    If fila <> 10 And Application.CountA(ws.Range("C" & fila & ":L" & fila)) > 0 Then
+        If MsgBox("La siguiente fila disponible en A/B ya contiene información en C:L. ¿Reemplazar C:L por el modelo de fila 10?", _
+            vbYesNo + vbExclamation + vbDefaultButton2) <> vbYes Then Exit Sub
+    End If
+    eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    If Not AutorizarCuentasMenu(ws, claveComprobada) Then GoTo Cancelado
+    ws.Unprotect Password:=CLAVE_HOJA
+    If fila <> 10 Then
+        ws.Range("C10:L10").Copy
+        ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteFormulas
+        ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteFormats
+        ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteValidation
+        'Antes de crear la hoja correspondiente, K/L deben verse vacías.
+        ws.Range("K" & fila & ":L" & fila).Formula = "="""""
+    ElseIf Not ExisteHoja("PLANTILLA 01") Then
+        ws.Range("K10").Formula = "=IFERROR(" & Mid(ws.Range("K10").Formula, 2) & ","""")"
+        ws.Range("L10").Formula = "=IFERROR(" & Mid(ws.Range("L10").Formula, 2) & ","""")"
+    End If
+    ws.Range("A" & fila & ":B" & fila).Locked = False
+    If EstaEnMantenimiento(ws) Then
+        ws.Range("C" & fila & ":L" & fila).Locked = False
+        CapturarContenido ws.Range("C" & fila & ":L" & fila), respaldoMantenimiento
+    Else
+        ws.Range("C" & fila & ":L" & fila).Locked = True
+    End If
+    ProtegerHojaTrabajo ws
+    ws.Activate
+    ws.Cells(fila, 1).Select
+Salida:
+    On Error Resume Next
+    Application.CutCopyMode = False
+    Err.Clear: ProtegerHojaTrabajo ws
+    If Err.Number <> 0 Then detalle = detalle & " No se pudo proteger MENÚ: " & Err.Description
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    On Error GoTo 0
+    If detalle <> "" Then
+        MsgBox "No se completó la fila de MENÚ: " & detalle, vbCritical
+    Else
+        MsgBox "Fila " & fila & " preparada. Ingrese las cuentas en A/B. No se creó ninguna hoja.", vbInformation
+    End If
+    Exit Sub
+Cancelado:
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    Exit Sub
+Fallo:
+    detalle = Err.Description
+    On Error Resume Next
+    FinalizarMantenimiento
+    If Err.Number <> 0 Then detalle = detalle & " No se cerró la autorización: " & Err.Description
+    On Error GoTo 0
+    GoTo Salida
+End Sub
+
+Private Sub VincularFilaMenu(ByVal ws As Worksheet, ByVal fila As Long, ByVal hoja As String)
+    Dim modelo As Range, destino As Range, texto As String, columna As Long
+    ws.Unprotect Password:=CLAVE_HOJA
+    For columna = 11 To 12
+        Set modelo = ws.Cells(10, columna)
+        Set destino = ws.Cells(fila, columna)
+        texto = modelo.FormulaR1C1
+        'El modelo existente K10/L10 debe apuntar a PLANTILLA 01.
+        If InStr(1, texto, "PLANTILLA 01", vbTextCompare) = 0 Then
+            ProtegerHojaTrabajo ws
+            Err.Raise 5, , "Revise el modelo K10/L10: debe contener la referencia a PLANTILLA 01 para vincular nuevas hojas."
+        End If
+        destino.FormulaR1C1 = Replace(texto, "PLANTILLA 01", hoja, 1, -1, vbTextCompare)
+    Next columna
+    If EstaEnMantenimiento(ws) Then CapturarContenido ws.Range("K" & fila & ":L" & fila), respaldoMantenimiento
+    ProtegerHojaTrabajo ws
+End Sub
+
+
+Sub ActualizarRespaldoDespuesDeEntrada(ByVal ws As Worksheet, ByVal Target As Range)
+    Dim entrada As Range, area As Range, siguiente As Long, detalle As String
+    If Not EstaEnMantenimiento(ws) Or EsHojaTecnica(ws.Name) Then Exit Sub
+    Set entrada = Intersect(Target, Union(ws.Range("A12:G" & ws.Rows.Count), ws.Range("U12:V" & ws.Rows.Count)))
+    If entrada Is Nothing Then Exit Sub
+    On Error GoTo Fallo
+    For Each area In entrada.Areas
+        CapturarContenido ws.Range("H" & area.Row & ":T" & (area.Row + area.Rows.Count - 1)), respaldoMantenimiento
+    Next area
+    siguiente = Application.Max(PRIMERA_FILA, ObtenerUltimaFilaEntrada(ws) + 1)
+    If siguiente <= ws.Rows.Count Then CapturarContenido ws.Range("H" & siguiente & ":T" & siguiente), respaldoMantenimiento
+    Exit Sub
+Fallo:
+    detalle = Err.Description
+    On Error Resume Next
+    FinalizarMantenimiento
+    On Error GoTo 0
+    Err.Raise 5, , "Se cerró el mantenimiento al fallar su respaldo: " & detalle
+End Sub
+
+
+Private Sub VerificarModeloMenu(ByVal ws As Worksheet)
+    Dim columna As Long
+    For columna = 11 To 12
+        If Not ws.Cells(10, columna).HasFormula Then Err.Raise 5, , "Falta una fórmula modelo de MENÚ en K10/L10."
+        If InStr(1, ws.Cells(10, columna).Formula, "PLANTILLA 01", vbTextCompare) = 0 Then _
+            Err.Raise 5, , "El modelo K10/L10 debe conservar su referencia a PLANTILLA 01. Revíselo antes de crear la hoja."
+    Next columna
+End Sub
+
+
+Private Sub VerificarZonaMantenimiento(ByVal ws As Worksheet, ByVal zona As Range)
+    Dim limite As Long, maxima As Long, cabecera As Range, cuerpo As Range, celda As Range
+    limite = PRIMERA_FILA: maxima = 22
+    If EsMenu(ws) Then limite = 10: maxima = 12
+    Set cabecera = Intersect(zona, ws.Rows("1:" & (limite - 1)))
+    If Not cabecera Is Nothing Then
+        VerificarContenidoRestaurable cabecera, True
+        For Each celda In cabecera.Cells
+            If celda.MergeCells Then
+                If celda.MergeArea.Column + celda.MergeArea.Columns.Count - 1 > maxima Or _
+                    celda.MergeArea.Row + celda.MergeArea.Rows.Count - 1 >= limite Then _
+                    Err.Raise 5, , "Una combinación del encabezado invade el cuerpo o sale del área funcional."
+            End If
+        Next celda
+    End If
+    Set cuerpo = Intersect(zona, ws.Rows(limite & ":" & ws.Rows.Count))
+    If Not cuerpo Is Nothing Then VerificarContenidoRestaurable cuerpo
+End Sub
+
+Function RecuperarMantenimientoInterrumpido(ByVal ws As Worksheet) As Boolean
+    Dim marca As Name, marcada As Worksheet, marcaCuentas As Name
+    On Error Resume Next
+    Set marcaCuentas = ThisWorkbook.Names("_NeteoV4_Cuentas")
+    On Error GoTo 0
+    If Not marcaCuentas Is Nothing And hojaCuentasMenu Is Nothing Then
+        Set marcada = marcaCuentas.RefersToRange.Parent
+        If marcada Is ws Then
+            FinalizarMantenimiento
+            RecuperarMantenimientoInterrumpido = True
+            MsgBox "La autorización de cuentas se perdió al reiniciar VBA. MENÚ volvió a bloquearse; revise la última edición antes de guardar.", vbExclamation
+            Exit Function
+        End If
+    End If
+    If Not hojaMantenimiento Is Nothing Then
+        If Not respaldoMantenimiento Is Nothing Then Exit Function
+    End If
+    On Error Resume Next
+    Set marca = ThisWorkbook.Names("_NeteoV3_Mantenimiento")
+    On Error GoTo 0
+    If marca Is Nothing Then Exit Function
+    Set marcada = marca.RefersToRange.Parent
+    If Not (marcada Is ws) Then Exit Function
+    FinalizarMantenimiento
+    RecuperarMantenimientoInterrumpido = True
+    MsgBox "El mantenimiento perdió su respaldo (por ejemplo, tras reiniciar VBA). Se cerró y la hoja se protegió. No es posible recuperar automáticamente el contenido anterior de la última edición; revísela antes de guardar.", vbCritical
+End Function
+
+
+Function MenuAutorizado(ByVal ws As Worksheet) As Boolean
+    If Not EsMenu(ws) Then Exit Function
+    If Not hojaCuentasMenu Is Nothing Then
+        If hojaCuentasMenu Is ws Then MenuAutorizado = True: Exit Function
+    End If
+    MenuAutorizado = EstaEnMantenimiento(ws)
+End Function
+
+Private Function AutorizarCuentasMenu(ByVal ws As Worksheet, Optional ByVal claveComprobada As Boolean = False) As Boolean
+    Dim clave As String, detalle As String
+    If Not EsMenu(ws) Then Exit Function
+    If MenuAutorizado(ws) Then AutorizarCuentasMenu = True: Exit Function
+    If Not claveComprobada Then
+        clave = InputBox("Ingrese la contraseña para agregar filas y editar las cuentas. Esta ventana muestra los caracteres escritos.", "Autorizar MENÚ")
+        If clave = "" Then Exit Function
+        If clave <> CLAVE_HOJA Then
+            MsgBox "Contraseña incorrecta. No se modificó MENÚ.", vbExclamation
+            Exit Function
+        End If
+    End If
+    On Error GoTo Fallo
+    FinalizarMantenimiento
+    RestaurarBloqueoFuncional ws
+    Set hojaCuentasMenu = ws
+    ThisWorkbook.Names.Add Name:="_NeteoV4_Cuentas", RefersTo:="='" & Replace(ws.Name, "'", "''") & "'!$A$1", Visible:=False
+    ws.Unprotect Password:=CLAVE_HOJA
+    ws.Range("A10:B" & ws.Rows.Count).Locked = False
+    ProtegerHojaTrabajo ws
+    AutorizarCuentasMenu = True
+    Exit Function
+Fallo:
+    detalle = Err.Description
+    On Error Resume Next
+    FinalizarMantenimiento
+    If Err.Number <> 0 Then detalle = detalle & " No se pudo cerrar la autorización: " & Err.Description
+    On Error GoTo 0
+    Err.Raise 5, , "No se autorizó MENÚ: " & detalle
+End Function
+
+Sub AvisarSalidaMenu(ByVal ws As Worksheet)
+    Dim eventos As Boolean, detalle As String
+    If Not EsMenu(ws) Then Exit Sub
+    eventos = Application.EnableEvents
+    On Error GoTo Fallo
+    Application.EnableEvents = False
+    If RecuperarMantenimientoInterrumpido(ws) Then GoTo Salida
+    If Not MenuAutorizado(ws) Then GoTo Salida
+    If MsgBox("Va a salir de MENÚ con edición autorizada." & vbCrLf & _
+        "Sí: bloquear MENÚ y finalizar la autorización." & vbCrLf & _
+        "No: mantener el permiso actual para volver a editar.", vbYesNo + vbQuestion + vbDefaultButton1, "Protección de MENÚ") = vbYes Then
+        FinalizarMantenimiento
+    End If
+Salida:
+    Application.EnableEvents = eventos
+    If detalle <> "" Then Err.Raise 5, , detalle
+    Exit Sub
+Fallo:
+    detalle = "No se completó la protección de MENÚ al salir: " & Err.Description
+    Resume Salida
+End Sub
+
+Sub EliminarUltimaFilaMenu()
+    Dim ws As Worksheet, ultima As Range, zona As Range, superior As Range, celda As Range
+    Dim fila As Long, clave As String, mensaje As String, asociada As String
+    Dim mantenimientoAnterior As Boolean, cuentasAnteriores As Boolean, contieneCuentas As Boolean
+    Dim eventos As Boolean, pantalla As Boolean, errorNumero As Long, detalle As String
+    Dim respaldo As Workbook, bordes() As Variant, limpiezaIniciada As Boolean, recuperado As Boolean
+    Dim respaldoListo As Boolean, falloRecuperacion As String
+    Set ws = ObtenerHojaMenu()
+    If ws Is Nothing Then
+        MsgBox "No se encontró MENÚ.", vbExclamation
+        Exit Sub
+    End If
+    'Esta acción siempre exige contraseña, aunque ya exista autorización.
+    clave = InputBox("Ingrese la contraseña para eliminar la última fila de MENÚ. Esta ventana muestra los caracteres escritos.", "Eliminar última fila")
+    If clave = "" Then Exit Sub
+    If clave <> CLAVE_HOJA Then
+        MsgBox "Contraseña incorrecta. No se modificó MENÚ.", vbExclamation
+        Exit Sub
+    End If
+    clave = vbNullString
+    eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating
+    On Error GoTo Fallo
+    If RecuperarMantenimientoInterrumpido(ws) Then Exit Sub
+    mantenimientoAnterior = EstaEnMantenimiento(ws)
+    cuentasAnteriores = MenuAutorizado(ws) And Not mantenimientoAnterior
+    Set ultima = ws.Range("A10:L" & ws.Rows.Count).Find(What:="*", After:=ws.Range("A10"), _
+        LookIn:=xlFormulas, LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+    If ultima Is Nothing Then
+        MsgBox "No hay una fila adicional para eliminar. La fila 10 se conserva siempre.", vbInformation
+        Exit Sub
+    End If
+    fila = ultima.Row
+    If fila <= 10 Then
+        MsgBox "No se permite eliminar la fila 10. Debe conservarse como mínimo esa fila.", vbExclamation
+        Exit Sub
+    End If
+    asociada = HojaAsociadaFilaMenu(ws, fila)
+    If asociada <> "" Then
+        MsgBox "No se puede eliminar la fila " & fila & ": está asociada a la hoja " & asociada & ". No se eliminó ninguna fila.", vbExclamation
+        Exit Sub
+    End If
+    Set zona = ws.Range("A" & fila & ":L" & fila)
+    Set superior = ws.Range("A" & (fila - 1) & ":L" & (fila - 1))
+    VerificarContenidoRestaurable zona
+    VerificarContenidoRestaurable superior
+    contieneCuentas = (Application.CountA(ws.Range("A" & fila & ":B" & fila)) > 0)
+    mensaje = "Se limpiará A:L de la fila " & fila & ", sin desplazar otras filas." & vbCrLf
+    If contieneCuentas Then
+        mensaje = mensaje & "ATENCIÓN: esta fila contiene cuentas en A o B." & vbCrLf
+    Else
+        mensaje = mensaje & "La fila está preparada, pero no contiene cuentas en A/B." & vbCrLf
+    End If
+    mensaje = mensaje & "Se quitarán contenido, fórmulas, formatos, bordes y validaciones. Se conservará el borde inferior de la fila superior." & vbCrLf & "¿Desea continuar?"
+    If MsgBox(mensaje, vbYesNo + vbExclamation + vbDefaultButton2, "Confirmar eliminación de fila " & fila) <> vbYes Then Exit Sub
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    BordeInferiorFilaMenu superior, True, bordes
+    Set respaldo = CrearRespaldo()
+    CapturarContenido zona, respaldo
+    zona.Copy
+    respaldo.Worksheets(3).Range(zona.Address).PasteSpecial Paste:=xlPasteFormats
+    respaldo.Worksheets(3).Range(zona.Address).PasteSpecial Paste:=xlPasteValidation
+    Application.CutCopyMode = False
+    respaldoListo = True
+    ws.Unprotect Password:=CLAVE_HOJA
+    limpiezaIniciada = True
+    zona.Clear
+    zona.Validation.Delete
+    BordeInferiorFilaMenu superior, False, bordes
+    zona.Locked = True
+    If mantenimientoAnterior Then
+        zona.Locked = False
+        CapturarContenido ws.Range("C" & fila & ":L" & fila), respaldoMantenimiento
+    ElseIf cuentasAnteriores Then
+        ws.Range("A" & fila & ":B" & fila).Locked = False
+    End If
+    ProtegerHojaTrabajo ws
+Salida:
+    On Error Resume Next
+    If errorNumero <> 0 And limpiezaIniciada And respaldoListo Then
+        recuperado = True
+        Err.Clear
+        ws.Unprotect Password:=CLAVE_HOJA
+        If Err.Number <> 0 Then recuperado = False: falloRecuperacion = Err.Description
+        If recuperado Then
+            Err.Clear
+            RestaurarContenido zona, respaldo
+            If Err.Number <> 0 Then recuperado = False: falloRecuperacion = Err.Description
+        End If
+        If recuperado Then
+            Err.Clear
+            respaldo.Worksheets(3).Range(zona.Address).Copy
+            zona.PasteSpecial Paste:=xlPasteFormats
+            zona.PasteSpecial Paste:=xlPasteValidation
+            If Err.Number <> 0 Then recuperado = False: falloRecuperacion = Err.Description
+        End If
+        If recuperado Then
+            Err.Clear
+            BordeInferiorFilaMenu superior, False, bordes
+            If Err.Number <> 0 Then recuperado = False: falloRecuperacion = Err.Description
+        End If
+        If recuperado Then
+            Err.Clear
+            zona.Locked = Not mantenimientoAnterior
+            If cuentasAnteriores Then ws.Range("A" & fila & ":B" & fila).Locked = False
+            If Err.Number <> 0 Then recuperado = False: falloRecuperacion = Err.Description
+        End If
+        If recuperado And mantenimientoAnterior Then
+            Err.Clear
+            'Reponer también el estado anterior del respaldo de mantenimiento.
+            CapturarContenido ws.Range("C" & fila & ":L" & fila), respaldoMantenimiento
+            If Err.Number <> 0 Then recuperado = False: falloRecuperacion = Err.Description
+        End If
+        If recuperado Then
+            detalle = detalle & vbCrLf & "Se recuperó el estado anterior de la fila."
+        Else
+            detalle = detalle & vbCrLf & "La recuperación NO se completó: " & falloRecuperacion & ". Se conserva el respaldo temporal abierto."
+            respaldo.Windows(1).Visible = True
+            Err.Clear
+            FinalizarMantenimiento
+            RestaurarBloqueoFuncional ws
+            If Err.Number <> 0 Then detalle = detalle & " No se restableció completamente la protección: " & Err.Description
+        End If
+    End If
+    If Not respaldo Is Nothing Then
+        If Not limpiezaIniciada Or errorNumero = 0 Or recuperado Then
+            Err.Clear
+            respaldo.Close SaveChanges:=False
+            If Err.Number <> 0 Then detalle = detalle & " No se pudo cerrar el respaldo temporal: " & Err.Description
+        End If
+    End If
+    Application.CutCopyMode = False
+    Err.Clear
+    ProtegerHojaTrabajo ws
+    If Err.Number <> 0 Then detalle = detalle & " No se pudo proteger MENÚ: " & Err.Description
+    If Not ws.ProtectContents Then detalle = detalle & " MENÚ ESTÁ DESPROTEGIDA."
+    Err.Clear
+    ws.Activate
+    If Err.Number <> 0 Then detalle = detalle & " No se pudo volver a MENÚ: " & Err.Description
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    On Error GoTo 0
+    If detalle <> "" Then
+        MsgBox "No se completó la eliminación: " & detalle, vbCritical
+    Else
+        MsgBox "Se limpió A:L de la fila " & fila & ". No se desplazaron filas y se conservó el borde inferior de la fila " & (fila - 1) & ".", vbInformation
+    End If
+    Exit Sub
+Fallo:
+    errorNumero = Err.Number: detalle = Err.Description
+    Resume Salida
+End Sub
+
+Private Function HojaAsociadaFilaMenu(ByVal ws As Worksheet, ByVal fila As Long) As String
+    Dim esperada As String, hoja As Worksheet, columna As Long, formula As String
+    esperada = "PLANTILLA " & Format(fila - 9, "00")
+    If ExisteHoja(esperada) Then
+        HojaAsociadaFilaMenu = esperada
+        Exit Function
+    End If
+    For columna = 11 To 12
+        If ws.Cells(fila, columna).HasFormula Then
+            formula = CStr(ws.Cells(fila, columna).Formula)
+            For Each hoja In ThisWorkbook.Worksheets
+                If Not EsHojaTecnica(hoja.Name) Then
+                    If InStr(1, formula, "'" & Replace(hoja.Name, "'", "''") & "'!", vbTextCompare) > 0 Or _
+                        InStr(1, formula, hoja.Name & "!", vbTextCompare) > 0 Then
+                        HojaAsociadaFilaMenu = hoja.Name
+                        Exit Function
+                    End If
+                End If
+            Next hoja
+            'K/L sin vínculo solo deben tener la fórmula provisional de vacío.
+            If Replace(Trim(formula), " ", "") <> "=""""" Then
+                Err.Raise 5, , "No se puede comprobar con seguridad la asociación de " & ws.Cells(fila, columna).Address(False, False) & ". Revise su fórmula antes de eliminar la fila."
+            End If
+        End If
+    Next columna
+End Function
+
+Private Sub BordeInferiorFilaMenu(ByVal zona As Range, ByVal capturar As Boolean, ByRef datos() As Variant)
+    Dim columna As Long, borde As Border, tema As Variant
+    If capturar Then ReDim datos(1 To zona.Columns.Count, 1 To 6)
+    For columna = 1 To zona.Columns.Count
+        Set borde = zona.Cells(1, columna).Borders(xlEdgeBottom)
+        If capturar Then
+            datos(columna, 1) = borde.LineStyle
+            If borde.LineStyle <> xlLineStyleNone Then
+                datos(columna, 2) = borde.Weight
+                datos(columna, 3) = borde.Color
+                datos(columna, 4) = borde.ColorIndex
+                datos(columna, 5) = borde.TintAndShade
+                tema = Empty
+                On Error Resume Next
+                Err.Clear
+                tema = borde.ThemeColor
+                If Err.Number <> 0 Then tema = Empty
+                On Error GoTo 0
+                datos(columna, 6) = tema
+            End If
+        Else
+            borde.LineStyle = datos(columna, 1)
+            If datos(columna, 1) <> xlLineStyleNone Then
+                borde.Weight = datos(columna, 2)
+                If Not IsEmpty(datos(columna, 6)) Then
+                    borde.ThemeColor = datos(columna, 6)
+                ElseIf datos(columna, 4) = xlColorIndexAutomatic Then
+                    borde.ColorIndex = xlColorIndexAutomatic
+                Else
+                    borde.Color = datos(columna, 3)
+                End If
+                borde.TintAndShade = datos(columna, 5)
+            End If
+        End If
+    Next columna
+End Sub
+
+
