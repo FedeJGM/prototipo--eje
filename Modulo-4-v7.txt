@@ -2328,7 +2328,7 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
     Dim ws As Worksheet, menu As Worksheet, celda As Range, primera As String, patron As Variant
     Dim marca As Name, validaciones As Range, area As Range, columna As Range, regla As Object, valor As Variant
     Dim grafico As ChartObject, serie As Series, tabla As PivotTable, vinculo As Hyperlink, hojaGrafico As Chart
-    Dim paso As String, numeroError As Long, descripcionError As String, fuenteError As String, indiceRegla As Long
+    Dim paso As String, numeroError As Long, descripcionError As String, fuenteError As String, indiceRegla As Long, gruposValidacion As Long
     On Error GoTo Fallo
     paso = "Localizar MENÚ para revisar dependencias"
     Set menu = ObtenerHojaMenu()
@@ -2367,13 +2367,8 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
                 paso = "Recorrer rangos de validación de " & ws.Name
                 For Each area In validaciones.Areas
                     For Each columna In area.Columns
-                        paso = "Leer Validation.Formula1 de " & ws.Name & "!" & columna.Address(False, False)
-                        valor = columna.Validation.Formula1
-                        If IsNull(valor) Then Err.Raise 5, , "Hay validaciones diferentes en " & ws.Name & "!" & columna.Address(False, False) & "; revise sus referencias antes de modificar plantillas."
-                        VerificarTextoDependencia CStr(valor), nombre, "validación " & ws.Name & "!" & columna.Address(False, False)
-                        paso = "Leer Validation.Formula2 de " & ws.Name & "!" & columna.Address(False, False)
-                        valor = columna.Validation.Formula2
-                        If Not IsNull(valor) Then VerificarTextoDependencia CStr(valor), nombre, "validación " & ws.Name & "!" & columna.Address(False, False)
+                        paso = "Revisar grupos de validación de " & ws.Name & "!" & columna.Address(False, False)
+                        VerificarValidacionesDependientes columna, nombre, gruposValidacion
                     Next columna
                 Next area
             End If
@@ -2551,4 +2546,75 @@ Fallo:
     End If
     On Error GoTo 0
     GoTo Salida
+End Sub
+
+Private Sub VerificarValidacionesDependientes(ByVal zona As Range, ByVal nombre As String, ByRef grupos As Long)
+    Dim pendientes As Collection, bloque As Range, iguales As Range, restantes As Range, parte As Range, primera As Range
+    Dim tipo As Variant, operador As Variant, valor As Variant, paso As String
+    Dim numeroError As Long, descripcionError As String, fuenteError As String
+    Set pendientes = New Collection
+    pendientes.Add zona
+    On Error GoTo Fallo
+    Do While pendientes.Count > 0
+        Set bloque = pendientes(pendientes.Count)
+        pendientes.Remove pendientes.Count
+        paso = "Agrupar validaciones de " & bloque.Parent.Name & "!" & bloque.Address(False, False)
+        grupos = grupos + 1
+        If grupos > 8192 Then Err.Raise 5, , "La revisión encontró demasiados grupos de validación. Debe revisar y consolidar las validaciones antes de eliminar; no se omitirá ninguna. Este límite es de fragmentación, no de filas de datos."
+        Set primera = bloque.Cells(1, 1)
+        If bloque.CountLarge = 1 Then
+            Set iguales = bloque
+        Else
+            Set iguales = bloque.SpecialCells(xlCellTypeSameValidation)
+            Set iguales = Intersect(bloque, iguales)
+        End If
+        If iguales Is Nothing Then Err.Raise 5, , "Excel no identificó un grupo de validación dentro del rango."
+        If Intersect(primera, iguales) Is Nothing Then Err.Raise 5, , "El grupo de validación no incluye la primera celda pendiente."
+        If iguales.Areas.Count > 256 Then Err.Raise 5, , "Las validaciones están muy fragmentadas. Debe revisar y consolidar sus áreas antes de eliminar; no se omitirá ninguna regla."
+        'La celda representa un grupo completo identificado por Excel, no una muestra de sus extremos.
+        paso = "Leer Validation.Type de " & primera.Parent.Name & "!" & primera.Address(False, False)
+        tipo = primera.Validation.Type
+        If IsNull(tipo) Or IsEmpty(tipo) Then Err.Raise 5, , "No se pudo identificar el tipo de validación de esa celda."
+        paso = "Leer Validation.Formula1 de " & primera.Parent.Name & "!" & primera.Address(False, False)
+        valor = primera.Validation.Formula1
+        If IsNull(valor) Then Err.Raise 5, , "No se pudo leer el primer criterio de validación de esa celda."
+        VerificarTextoDependencia CStr(valor), nombre, "validación " & primera.Parent.Name & "!" & primera.Address(False, False)
+        'Listas y fórmulas personalizadas no utilizan Formula2; solo se lee cuando el operador la requiere.
+        Select Case tipo
+            Case xlValidateWholeNumber, xlValidateDecimal, xlValidateDate, xlValidateTime, xlValidateTextLength
+                paso = "Leer Validation.Operator de " & primera.Parent.Name & "!" & primera.Address(False, False)
+                operador = primera.Validation.Operator
+                If IsNull(operador) Then Err.Raise 5, , "No se pudo leer el operador de validación de esa celda."
+                If operador = xlBetween Or operador = xlNotBetween Then
+                    paso = "Leer Validation.Formula2 de " & primera.Parent.Name & "!" & primera.Address(False, False)
+                    valor = primera.Validation.Formula2
+                    If IsNull(valor) Then Err.Raise 5, , "No se pudo leer el segundo criterio de validación de esa celda."
+                    VerificarTextoDependencia CStr(valor), nombre, "validación " & primera.Parent.Name & "!" & primera.Address(False, False)
+                End If
+            Case xlValidateInputOnly, xlValidateList, xlValidateCustom
+                'Solo entrada devuelve el primer criterio vacío; sus mensajes no se modifican.
+            Case Else
+                Err.Raise 5, , "Tipo de validación no reconocido. No se continuará sin revisar esa regla."
+        End Select
+        paso = "Comprobar cobertura de validaciones de " & bloque.Parent.Name & "!" & bloque.Address(False, False)
+        Set restantes = bloque
+        For Each parte In iguales.Areas
+            If restantes Is Nothing Then Err.Raise 5, , "El grupo de validación tiene áreas inconsistentes."
+            Set restantes = ExcluirZona(restantes, parte)
+        Next parte
+        If restantes Is Nothing Then
+            If iguales.CountLarge <> bloque.CountLarge Then Err.Raise 5, , "No se comprobó la cobertura completa del grupo de validación."
+        Else
+            If restantes.CountLarge >= bloque.CountLarge Then Err.Raise 5, , "La revisión de validaciones no avanzó; se detuvo sin eliminar."
+            If restantes.CountLarge + iguales.CountLarge <> bloque.CountLarge Then Err.Raise 5, , "La resta de grupos no cubre todas las celdas de validación."
+            If restantes.Areas.Count + pendientes.Count > 256 Then Err.Raise 5, , "Quedan demasiadas áreas de validación diferentes. Debe revisar y consolidar sus reglas antes de eliminar."
+            For Each parte In restantes.Areas
+                pendientes.Add parte
+            Next parte
+        End If
+    Loop
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    Err.Raise numeroError, fuenteError, "Validaciones [" & paso & "]: " & descripcionError
 End Sub
