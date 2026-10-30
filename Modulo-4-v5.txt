@@ -1,10 +1,5 @@
 Option Explicit
-'Módulo 4 integrado. Sustituir el módulo completo; no añadir a las partes anteriores.
-'Versión 5: conservar ThisBook-v4.txt sin cambios. Compilar/probar en una COPIA de Excel.
-'Entradas A:G y U:V desde fila 12; H calculada, no importada.
-'Ejecutar una vez ProtegerTodasLasHojasTrabajo para corregir los bloqueos existentes.
-'No se garantiza rendimiento sin medir el libro real; las macros no son una barrera de seguridad.
-'La clave original se conserva una sola vez. No duplicarla en otro módulo.
+
 Public Const CLAVE_HOJA As String = "GPT2026"
 Private Const PRIMERA_FILA As Long = 12
 Private Const TAMANO_BLOQUE As Long = 10000
@@ -462,15 +457,8 @@ Sub CrearNuevaHojaDesdePlantilla()
     eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
     alertasAnteriores = Application.DisplayAlerts
     On Error GoTo Fallo
-    Set wsMenu = ObtenerHojaMenu(): Set wsPlantilla = ObtenerHojaPlantilla()
-    If wsMenu Is Nothing Or wsPlantilla Is Nothing Then Err.Raise 5, , "No se encontró MENÚ o PLANTILLA."
-    visibilidadOriginal = wsPlantilla.Visible: visibilidadLeida = True
-    numeroNuevaHoja = ContarHojasTrabajoCreadas() + 1
-    filaMenu = numeroNuevaHoja + 9
-    nombreNuevaHoja = "PLANTILLA " & Format(numeroNuevaHoja, "00")
-    If Not FilaMenuCompleta(wsMenu, filaMenu, detalleErrores) Then Err.Raise 5, , "MENÚ incompleto: " & detalleErrores
-    If ExisteHoja(nombreNuevaHoja) Then Err.Raise 5, , "Ya existe " & nombreNuevaHoja
-    VerificarModeloMenu wsMenu
+    Set wsMenu = ObtenerHojaMenu()
+    If wsMenu Is Nothing Then Err.Raise 5, , "No se encontró MENÚ."
     If RecuperarMantenimientoInterrumpido(wsMenu) Then Exit Sub
     'La clave de creación no concede permisos de edición sobre MENÚ.
     If Not MenuAutorizado(wsMenu) Then
@@ -482,6 +470,15 @@ Sub CrearNuevaHojaDesdePlantilla()
         End If
     End If
     claveCreacion = vbNullString
+    Set wsPlantilla = ObtenerHojaPlantilla()
+    If wsPlantilla Is Nothing Then Err.Raise 5, , "No se encontró PLANTILLA."
+    visibilidadOriginal = wsPlantilla.Visible: visibilidadLeida = True
+    numeroNuevaHoja = ContarHojasTrabajoCreadas() + 1
+    filaMenu = numeroNuevaHoja + 9
+    nombreNuevaHoja = "PLANTILLA " & Format(numeroNuevaHoja, "00")
+    If Not FilaMenuCompleta(wsMenu, filaMenu, detalleErrores) Then Err.Raise 5, , "MENÚ incompleto: " & detalleErrores
+    If ExisteHoja(nombreNuevaHoja) Then Err.Raise 5, , "Ya existe " & nombreNuevaHoja
+    VerificarModeloMenu wsMenu
     If MsgBox("¿Crear " & nombreNuevaHoja & " desde la fila " & filaMenu & " de MENÚ?", vbYesNo + vbQuestion) <> vbYes Then Exit Sub
     Application.EnableEvents = False: Application.ScreenUpdating = False
     wsPlantilla.Visible = xlSheetVisible
@@ -1769,12 +1766,24 @@ End Sub
 
 Sub AgregarFilaMenu()
     Dim ws As Worksheet, ultimo As Range, fila As Long, eventos As Boolean, pantalla As Boolean, detalle As String
+    Dim claveFila As String, claveComprobada As Boolean
     Set ws = ObtenerHojaMenu()
     If ws Is Nothing Then
         MsgBox "No se encontró MENÚ.", vbExclamation
         Exit Sub
     End If
     If RecuperarMantenimientoInterrumpido(ws) Then Exit Sub
+    'Comprobar la clave antes de revisar datos o fórmulas, sin habilitar aún A/B.
+    If Not MenuAutorizado(ws) Then
+        claveFila = InputBox("Ingrese la contraseña para agregar filas y editar las cuentas. Esta ventana muestra los caracteres escritos.", "Autorizar MENÚ")
+        If claveFila = "" Then Exit Sub
+        If claveFila <> CLAVE_HOJA Then
+            MsgBox "Contraseña incorrecta. No se modificó MENÚ.", vbExclamation
+            Exit Sub
+        End If
+        claveComprobada = True
+    End If
+    claveFila = vbNullString
     Set ultimo = ws.Range("A10:B" & ws.Rows.Count).Find(What:="*", After:=ws.Range("A10"), _
         LookIn:=xlFormulas, LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
     fila = 10
@@ -1800,7 +1809,7 @@ Sub AgregarFilaMenu()
     eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating
     On Error GoTo Fallo
     Application.EnableEvents = False: Application.ScreenUpdating = False
-    If Not AutorizarCuentasMenu(ws) Then GoTo Cancelado
+    If Not AutorizarCuentasMenu(ws, claveComprobada) Then GoTo Cancelado
     ws.Unprotect Password:=CLAVE_HOJA
     If fila <> 10 Then
         ws.Range("C10:L10").Copy
