@@ -1,0 +1,128 @@
+﻿Sub ALCON()
+
+'Generación DATA ALCON. Compatibilidad con estructura protegida de Módulo 4 v7.'
+
+    Dim HOJA As String
+    Dim NOMBRE As String
+    Dim ultimaFilaAlcon As Long
+    Dim filaOrigenAlcon As Long
+    Dim filaDestinoAlcon As Long
+    Dim wsOrigenAlcon As Worksheet
+    Dim wsAlcon As Worksheet
+    Dim valorPartidaAlcon As Variant
+
+    Dim libroOrigen As Workbook, libroSalida As Workbook
+    Dim visibilidadAnterior As XlSheetVisibility, ventanas As Boolean, visibilidadLeida As Boolean
+    Dim eventos As Boolean, pantalla As Boolean, alertas As Boolean, guardado As Boolean, detalle As String
+
+    Set libroOrigen = ThisWorkbook
+    eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating: alertas = Application.DisplayAlerts
+    ventanas = libroOrigen.ProtectWindows
+    On Error GoTo Fallo
+    If Not TypeOf ActiveSheet Is Worksheet Then Err.Raise 5, , "Seleccione una hoja operativa del libro."
+    Set wsOrigenAlcon = ActiveSheet
+    If Not (wsOrigenAlcon.Parent Is libroOrigen) Then Err.Raise 5, , "Seleccione una hoja de este libro antes de exportar ALCON."
+    HOJA = wsOrigenAlcon.Name
+    NOMBRE = libroOrigen.Name
+    Set wsAlcon = libroOrigen.Worksheets("ALCON")
+    visibilidadAnterior = wsAlcon.Visible: visibilidadLeida = True
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    libroOrigen.Unprotect Password:=CLAVE_HOJA
+    wsAlcon.Visible = xlSheetVisible
+    libroOrigen.Protect Password:=CLAVE_HOJA, Structure:=True, Windows:=ventanas
+
+    wsAlcon.Range("A2:G1048576").ClearContents
+
+    wsAlcon.Range("A1").Value = "CODIGO OFICINA"
+    wsAlcon.Range("B1").Value = "FECHA PARTIDA"
+    wsAlcon.Range("C1").Value = "No IDENTIFICACION DEL CLIENTE"
+    wsAlcon.Range("D1").Value = "NOMBRE DEL CLIENTE"
+    wsAlcon.Range("E1").Value = "DESCRIPCION DE LA PARTIDA"
+    wsAlcon.Range("F1").Value = "VALOR PARTIDA"
+    wsAlcon.Range("G1").Value = "JUSTIFICACION"
+
+    ultimaFilaAlcon = wsOrigenAlcon.Cells(wsOrigenAlcon.Rows.Count, "F").End(xlUp).Row
+
+    filaDestinoAlcon = 2
+
+    For filaOrigenAlcon = 12 To ultimaFilaAlcon
+
+        If IsError(wsOrigenAlcon.Cells(filaOrigenAlcon, "A").Value) Then GoTo SiguienteFilaAlcon
+        If IsError(wsOrigenAlcon.Cells(filaOrigenAlcon, "B").Value) Then GoTo SiguienteFilaAlcon
+        If IsError(wsOrigenAlcon.Cells(filaOrigenAlcon, "D").Value) Then GoTo SiguienteFilaAlcon
+        If IsError(wsOrigenAlcon.Cells(filaOrigenAlcon, "C").Value) Then GoTo SiguienteFilaAlcon
+        If IsError(wsOrigenAlcon.Cells(filaOrigenAlcon, "E").Value) Then GoTo SiguienteFilaAlcon
+        If IsError(wsOrigenAlcon.Cells(filaOrigenAlcon, "F").Value) Then GoTo SiguienteFilaAlcon
+
+        valorPartidaAlcon = wsOrigenAlcon.Cells(filaOrigenAlcon, "F").Value
+
+        If Trim(CStr(valorPartidaAlcon)) = "" Then GoTo SiguienteFilaAlcon
+        If Not IsNumeric(valorPartidaAlcon) Then GoTo SiguienteFilaAlcon
+        If CDbl(valorPartidaAlcon) = 0 Then GoTo SiguienteFilaAlcon
+
+        wsAlcon.Cells(filaDestinoAlcon, "A").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "A").Value
+        wsAlcon.Cells(filaDestinoAlcon, "B").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "B").Value
+        wsAlcon.Cells(filaDestinoAlcon, "C").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "C").Value
+        wsAlcon.Cells(filaDestinoAlcon, "D").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "D").Value
+        wsAlcon.Cells(filaDestinoAlcon, "E").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "E").Value
+        wsAlcon.Cells(filaDestinoAlcon, "F").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "F").Value
+        wsAlcon.Cells(filaDestinoAlcon, "G").Value = wsOrigenAlcon.Cells(filaOrigenAlcon, "E").Value
+
+        filaDestinoAlcon = filaDestinoAlcon + 1
+
+SiguienteFilaAlcon:
+
+    Next filaOrigenAlcon
+
+    Application.CutCopyMode = False
+
+    wsAlcon.Select
+
+    If filaDestinoAlcon > 2 Then
+        wsAlcon.Range("A1:G" & filaDestinoAlcon - 1).Copy
+    Else
+        wsAlcon.Range("A1:G1").Copy
+    End If
+
+    Workbooks.Add
+    Set libroSalida = ActiveWorkbook
+    libroSalida.ActiveSheet.Paste
+    guardado = Application.Dialogs(xlDialogSaveAs).Show HOJA
+Salida:
+    On Error Resume Next
+    Application.CutCopyMode = False
+    If Not libroSalida Is Nothing Then
+        Application.DisplayAlerts = False
+        Err.Clear: libroSalida.Close SaveChanges:=False
+        If Err.Number <> 0 Then detalle = detalle & " No se cerró el libro de salida: " & Err.Description
+    End If
+    Err.Clear: libroOrigen.Activate
+    If Err.Number <> 0 Then detalle = detalle & " No se pudo volver al libro origen: " & Err.Description
+    If visibilidadLeida Then
+        Err.Clear: wsOrigenAlcon.Select
+        If Err.Number <> 0 Then detalle = detalle & " No se pudo volver a la hoja origen: " & Err.Description
+        Err.Clear: wsAlcon.Range("A2:G1048576").ClearContents
+        If Err.Number <> 0 Then detalle = detalle & " No se limpió ALCON: " & Err.Description
+        Err.Clear: libroOrigen.Unprotect Password:=CLAVE_HOJA
+        If Err.Number <> 0 Then detalle = detalle & " No se habilitó la estructura para restaurar ALCON: " & Err.Description
+        Err.Clear: wsAlcon.Visible = visibilidadAnterior
+        If Err.Number <> 0 Then detalle = detalle & " No se restauró la visibilidad de ALCON: " & Err.Description
+    End If
+    Err.Clear: libroOrigen.Protect Password:=CLAVE_HOJA, Structure:=True, Windows:=ventanas
+    If Err.Number <> 0 Then detalle = detalle & " No se protegió la estructura del libro origen: " & Err.Description
+    Application.DisplayAlerts = alertas
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    On Error GoTo 0
+    If detalle <> "" Then
+        MsgBox "No se completó toda la exportación ALCON: " & detalle, vbCritical
+    ElseIf guardado Then
+        wsOrigenAlcon.Range("A11").Select
+        MsgBox "¡Se ha guardado el plano de ALCON en la ruta seleccionada!", vbInformation, "Mensaje"
+    Else
+        MsgBox "Exportación ALCON cancelada. No se guardó el archivo de salida.", vbInformation
+    End If
+    Exit Sub
+Fallo:
+    detalle = Err.Description
+    Resume Salida
+End Sub
