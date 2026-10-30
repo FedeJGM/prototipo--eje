@@ -1,11 +1,5 @@
-﻿Option Explicit
-'Versión 7: coherencia de plantillas, eliminación de la última y protección estructural del libro.
-'Módulo 4 integrado. Sustituir el módulo completo; no añadir a las partes anteriores.
-'Usar con ThisBook-v4.txt sin cambios y Modulo-3-ALCON-v3.txt. Compilar/probar en una COPIA de Excel.
-'Entradas A:G y U:V desde fila 12; H calculada, no importada.
-'Ejecutar una vez ProtegerTodasLasHojasTrabajo para corregir los bloqueos existentes.
-'No se garantiza rendimiento sin medir el libro real; las macros no son una barrera de seguridad.
-'La clave original se conserva una sola vez. No duplicarla en otro módulo.
+Option Explicit
+
 Public Const CLAVE_HOJA As String = "GPT2026"
 Private Const PRIMERA_FILA As Long = 12
 Private Const TAMANO_BLOQUE As Long = 10000
@@ -2334,77 +2328,109 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
     Dim ws As Worksheet, menu As Worksheet, celda As Range, primera As String, patron As Variant
     Dim marca As Name, validaciones As Range, area As Range, columna As Range, regla As Object, valor As Variant
     Dim grafico As ChartObject, serie As Series, tabla As PivotTable, vinculo As Hyperlink, hojaGrafico As Chart
+    Dim paso As String, numeroError As Long, descripcionError As String, fuenteError As String, indiceRegla As Long
+    On Error GoTo Fallo
+    paso = "Localizar MENÚ para revisar dependencias"
     Set menu = ObtenerHojaMenu()
+    paso = "Contar conexiones del libro"
     If ThisWorkbook.Connections.Count > 0 Then Err.Raise 5, , "El libro contiene conexiones de datos. Revise sus dependencias antes de crear o eliminar plantillas; no se modificó ninguna."
+    paso = "Recorrer hojas del libro"
     For Each ws In ThisWorkbook.Worksheets
         If StrComp(ws.Name, nombre, vbTextCompare) <> 0 Then
             'Buscar únicamente fórmulas de riesgo, sin recorrer millones de celdas una por una.
             For Each patron In Array("*" & nombre & "*", "*#REF!*", "*INDIRECT*", "*EVALUATE(*", "*:*!")
+                paso = "Buscar fórmulas en " & ws.Name & " (patrón " & CStr(patron) & ")"
                 Set celda = ws.Cells.Find(What:=patron, After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
                     LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False, SearchFormat:=False)
                 If Not celda Is Nothing Then
                     primera = celda.Address
                     Do
+                        paso = "Leer fórmula de " & ws.Name & "!" & celda.Address(False, False)
                         If celda.HasFormula Then
                             If Not ((ws Is menu) And celda.Row = fila And (celda.Column = 11 Or celda.Column = 12)) Then _
                                 VerificarTextoDependencia CStr(celda.Formula), nombre, ws.Name & "!" & celda.Address(False, False)
                         End If
+                        paso = "Continuar búsqueda de fórmulas en " & ws.Name & " (patrón " & CStr(patron) & ")"
                         Set celda = ws.Cells.Find(What:=patron, After:=celda, LookIn:=xlFormulas, _
                             LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False, SearchFormat:=False)
                         If celda Is Nothing Then Exit Do
                     Loop While celda.Address <> primera
                 End If
             Next patron
+            paso = "Localizar validaciones de " & ws.Name
             Set validaciones = Nothing
             On Error Resume Next
             Set validaciones = ws.Cells.SpecialCells(xlCellTypeAllValidation)
-            On Error GoTo 0
+            Err.Clear
+            On Error GoTo Fallo
             If Not validaciones Is Nothing Then
+                paso = "Recorrer rangos de validación de " & ws.Name
                 For Each area In validaciones.Areas
                     For Each columna In area.Columns
+                        paso = "Leer Validation.Formula1 de " & ws.Name & "!" & columna.Address(False, False)
                         valor = columna.Validation.Formula1
                         If IsNull(valor) Then Err.Raise 5, , "Hay validaciones diferentes en " & ws.Name & "!" & columna.Address(False, False) & "; revise sus referencias antes de modificar plantillas."
                         VerificarTextoDependencia CStr(valor), nombre, "validación " & ws.Name & "!" & columna.Address(False, False)
+                        paso = "Leer Validation.Formula2 de " & ws.Name & "!" & columna.Address(False, False)
                         valor = columna.Validation.Formula2
                         If Not IsNull(valor) Then VerificarTextoDependencia CStr(valor), nombre, "validación " & ws.Name & "!" & columna.Address(False, False)
                     Next columna
                 Next area
             End If
+            paso = "Recorrer formatos condicionales de " & ws.Name
+            indiceRegla = 0
             For Each regla In ws.Cells.FormatConditions
+                indiceRegla = indiceRegla + 1
+                paso = "Leer FormatCondition.Type de " & ws.Name & ", regla " & indiceRegla
                 If regla.Type = xlExpression Or regla.Type = xlCellValue Then
+                    paso = "Leer FormatCondition.Formula1 de " & ws.Name & ", regla " & indiceRegla
                     VerificarTextoDependencia CStr(regla.Formula1), nombre, "formato condicional de " & ws.Name
                     If regla.Type = xlCellValue Then
+                        paso = "Leer FormatCondition.Formula2 de " & ws.Name & ", regla " & indiceRegla
                         If regla.Operator = xlBetween Or regla.Operator = xlNotBetween Then _
                             VerificarTextoDependencia CStr(regla.Formula2), nombre, "formato condicional de " & ws.Name
                     End If
                 End If
             Next regla
+            paso = "Recorrer gráficos de " & ws.Name
             For Each grafico In ws.ChartObjects
+                paso = "Leer series del gráfico " & ws.Name & ": " & grafico.Name
                 For Each serie In grafico.Chart.FullSeriesCollection
                     VerificarTextoDependencia serie.Formula, nombre, "gráfico " & ws.Name & ": " & grafico.Name
                 Next serie
             Next grafico
+            paso = "Recorrer tablas dinámicas de " & ws.Name
             For Each tabla In ws.PivotTables
+                paso = "Leer PivotCache.SourceData de " & ws.Name & ": " & tabla.Name
                 valor = tabla.PivotCache.SourceData
                 If IsArray(valor) Then Err.Raise 5, , "Revise la fuente múltiple de la tabla dinámica " & tabla.Name & " antes de modificar plantillas."
                 VerificarTextoDependencia CStr(valor), nombre, "tabla dinámica " & ws.Name & ": " & tabla.Name
             Next tabla
+            paso = "Leer destinos de hipervínculos de " & ws.Name
             For Each vinculo In ws.Hyperlinks
                 VerificarTextoDependencia vinculo.SubAddress, nombre, "hipervínculo de " & ws.Name
             Next vinculo
         End If
     Next ws
+    paso = "Recorrer hojas de gráficos"
     For Each hojaGrafico In ThisWorkbook.Charts
+        paso = "Leer series de la hoja de gráfico " & hojaGrafico.Name
         For Each serie In hojaGrafico.FullSeriesCollection
             VerificarTextoDependencia serie.Formula, nombre, "hoja de gráfico " & hojaGrafico.Name
         Next serie
     Next hojaGrafico
+    paso = "Recorrer nombres definidos del libro"
     For Each marca In ThisWorkbook.Names
+        paso = "Leer RefersTo del nombre " & marca.Name
         'Los nombres locales de la hoja eliminada desaparecen con ella; los globales no.
         If InStr(1, marca.Name, "'" & nombre & "'!", vbTextCompare) <> 1 And _
             InStr(1, marca.Name, nombre & "!", vbTextCompare) <> 1 Then _
             VerificarTextoDependencia marca.RefersTo, nombre, "nombre definido " & marca.Name
     Next marca
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    Err.Raise numeroError, fuenteError, "Dependencias [" & paso & "]: " & descripcionError
 End Sub
 
 Private Function GuardarRespaldoPlantilla(ByVal nombre As String) As String
@@ -2436,9 +2462,11 @@ Sub EliminarUltimaPlantilla()
     Dim clave As String, nombre As String, numero As Long, fila As Long, mensaje As String, rutaRespaldo As String
     Dim eventos As Boolean, pantalla As Boolean, alertas As Boolean, ventanas As Boolean
     Dim anteriores As Variant, cambioMenu As Boolean, eliminada As Boolean, detalle As String
+    Dim paso As String, numeroError As Long, descripcionError As String
     eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating: alertas = Application.DisplayAlerts
     ventanas = ThisWorkbook.ProtectWindows
     On Error GoTo Fallo
+    paso = "Localizar MENÚ"
     Set wsMenu = ObtenerHojaMenu()
     If wsMenu Is Nothing Then Err.Raise 5, , "No se encontró MENÚ."
     clave = InputBox("Ingrese la contraseña para eliminar la última plantilla. Esta ventana muestra los caracteres escritos.", "Eliminar plantilla")
@@ -2448,22 +2476,31 @@ Sub EliminarUltimaPlantilla()
         Exit Sub
     End If
     clave = vbNullString
+    paso = "Revisar mantenimiento de MENÚ"
     If RecuperarMantenimientoInterrumpido(wsMenu) Then Exit Sub
+    paso = "Comprobar secuencia de plantillas"
     numero = VerificarSecuenciaPlantillas()
     If numero <= 1 Then Err.Raise 5, , "No se permite eliminar PLANTILLA 01 ni la hoja modelo PLANTILLA. No hay una plantilla adicional para eliminar."
     nombre = "PLANTILLA " & Format(numero, "00"): fila = numero + 9
+    paso = "Obtener hoja " & nombre
     Set wsEliminar = ThisWorkbook.Worksheets(nombre)
+    paso = "Revisar mantenimiento de " & nombre
     If EstaEnMantenimiento(wsEliminar) Then Err.Raise 5, , "Finalice el mantenimiento de " & nombre & " antes de eliminarla."
     If RecuperarMantenimientoInterrumpido(wsEliminar) Then Exit Sub
     Set zona = wsMenu.Range("K" & fila & ":L" & fila)
+    paso = "Comprobar rango MENÚ!" & zona.Address(False, False)
     VerificarContenidoRestaurable zona
+    paso = "Revisar dependencias de " & nombre
     VerificarDependenciasPlantilla nombre, fila
     mensaje = "Se eliminará únicamente " & nombre & ", asociada a la fila " & fila & " de MENÚ." & vbCrLf
+    paso = "Buscar entradas en " & nombre & " (A:G y U:V)"
     If ObtenerUltimaFilaEntrada(wsEliminar) >= PRIMERA_FILA Then _
         mensaje = mensaje & "ATENCIÓN: contiene datos de entrada que se perderán de este libro." & vbCrLf
     mensaje = mensaje & "Se conservarán las cuentas y la fila de MENÚ. K/L quedarán visualmente vacías." & vbCrLf & _
         "Antes se guardará un respaldo completo en la carpeta de este libro. La recuperación desde ese archivo es manual; no depende de Ctrl+Z." & vbCrLf & "¿Desea continuar?"
+    paso = "Solicitar confirmación de eliminación"
     If MsgBox(mensaje, vbYesNo + vbExclamation + vbDefaultButton2, "Eliminar " & nombre) <> vbYes Then Exit Sub
+    paso = "Ejecutar eliminación confirmada"
     Application.EnableEvents = False: Application.ScreenUpdating = False
     ProtegerEstructuraLibro ventanas
     rutaRespaldo = GuardarRespaldoPlantilla(nombre)
@@ -2496,7 +2533,8 @@ Salida:
     End If
     Exit Sub
 Fallo:
-    detalle = Err.Description
+    numeroError = Err.Number: descripcionError = Err.Description
+    detalle = "Paso: " & paso & vbCrLf & "Error " & numeroError & ": " & descripcionError
     On Error Resume Next
     If cambioMenu And Not eliminada Then
         Err.Clear
