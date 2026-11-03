@@ -2324,11 +2324,12 @@ Private Sub VerificarTextoDependencia(ByVal texto As String, ByVal nombre As Str
     Loop
 End Sub
 
-Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As Long)
+Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As Long, Optional ByVal medir As Boolean = False)
     Dim ws As Worksheet, menu As Worksheet, celda As Range, primera As String, patron As Variant
     Dim marca As Name, validaciones As Range, area As Range, columna As Range, regla As Object, valor As Variant
     Dim grafico As ChartObject, serie As Series, tabla As PivotTable, vinculo As Hyperlink, hojaGrafico As Chart
     Dim paso As String, numeroError As Long, descripcionError As String, fuenteError As String, indiceRegla As Long, gruposValidacion As Long
+    Dim inicioHoja As Double, inicioFase As Double, tiempoF As Double, tiempoV As Double, tiempoFC As Double, tiempoOtros As Double
     On Error GoTo Fallo
     paso = "Localizar MENÚ para revisar dependencias"
     Set menu = ObtenerHojaMenu()
@@ -2337,6 +2338,7 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
     paso = "Recorrer hojas del libro"
     For Each ws In ThisWorkbook.Worksheets
         If StrComp(ws.Name, nombre, vbTextCompare) <> 0 Then
+            If medir Then inicioHoja = CDbl(Timer): inicioFase = inicioHoja
             'Buscar únicamente fórmulas de riesgo, sin recorrer millones de celdas una por una.
             For Each patron In Array("*" & nombre & "*", "*#REF!*", "*INDIRECT*", "*EVALUATE(*", "*:*!")
                 paso = "Buscar fórmulas en " & ws.Name & " (patrón " & CStr(patron) & ")"
@@ -2357,6 +2359,7 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
                     Loop While celda.Address <> primera
                 End If
             Next patron
+            If medir Then tiempoF = RegistrarTiempo("", inicioFase, False): inicioFase = CDbl(Timer)
             paso = "Localizar validaciones de " & ws.Name
             Set validaciones = Nothing
             On Error Resume Next
@@ -2372,6 +2375,7 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
                     Next columna
                 Next area
             End If
+            If medir Then tiempoV = RegistrarTiempo("", inicioFase, False): inicioFase = CDbl(Timer)
             paso = "Recorrer formatos condicionales de " & ws.Name
             indiceRegla = 0
             For Each regla In ws.Cells.FormatConditions
@@ -2387,6 +2391,7 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
                     End If
                 End If
             Next regla
+            If medir Then tiempoFC = RegistrarTiempo("", inicioFase, False): inicioFase = CDbl(Timer)
             paso = "Recorrer gráficos de " & ws.Name
             For Each grafico In ws.ChartObjects
                 paso = "Leer series del gráfico " & ws.Name & ": " & grafico.Name
@@ -2405,8 +2410,17 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
             For Each vinculo In ws.Hyperlinks
                 VerificarTextoDependencia vinculo.SubAddress, nombre, "hipervínculo de " & ws.Name
             Next vinculo
+            If medir Then
+                tiempoOtros = RegistrarTiempo("", inicioFase, False)
+                Debug.Print "Hoja " & ws.Name & " | F=" & Format(tiempoF, "0.000") & " s" & _
+                    " | V=" & Format(tiempoV, "0.000") & " s" & _
+                    " | FC=" & Format(tiempoFC, "0.000") & " s" & _
+                    " | Otros=" & Format(tiempoOtros, "0.000") & " s" & _
+                    " | Total=" & Format(RegistrarTiempo("", inicioHoja, False), "0.000") & " s"
+            End If
         End If
     Next ws
+    If medir Then inicioFase = CDbl(Timer)
     paso = "Recorrer hojas de gráficos"
     For Each hojaGrafico In ThisWorkbook.Charts
         paso = "Leer series de la hoja de gráfico " & hojaGrafico.Name
@@ -2422,6 +2436,7 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
             InStr(1, marca.Name, nombre & "!", vbTextCompare) <> 1 Then _
             VerificarTextoDependencia marca.RefersTo, nombre, "nombre definido " & marca.Name
     Next marca
+    If medir Then RegistrarTiempo "Dependencias globales (nombres/hojas de gráficos)", inicioFase
     Exit Sub
 Fallo:
     numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
@@ -2458,6 +2473,7 @@ Sub EliminarUltimaPlantilla()
     Dim eventos As Boolean, pantalla As Boolean, alertas As Boolean, ventanas As Boolean
     Dim anteriores As Variant, cambioMenu As Boolean, eliminada As Boolean, detalle As String
     Dim paso As String, numeroError As Long, descripcionError As String
+    Dim inicioTotal As Double, inicioPaso As Double
     eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating: alertas = Application.DisplayAlerts
     ventanas = ThisWorkbook.ProtectWindows
     On Error GoTo Fallo
@@ -2471,10 +2487,16 @@ Sub EliminarUltimaPlantilla()
         Exit Sub
     End If
     clave = vbNullString
+    inicioTotal = CDbl(Timer): inicioPaso = inicioTotal
+    Debug.Print "--- Medición previa en segundos; responder NO a la confirmación ---"
     paso = "Revisar mantenimiento de MENÚ"
     If RecuperarMantenimientoInterrumpido(wsMenu) Then Exit Sub
+    RegistrarTiempo "Mantenimiento MENÚ", inicioPaso
+    inicioPaso = CDbl(Timer)
     paso = "Comprobar secuencia de plantillas"
     numero = VerificarSecuenciaPlantillas()
+    RegistrarTiempo "Secuencia", inicioPaso
+    inicioPaso = CDbl(Timer)
     If numero <= 1 Then Err.Raise 5, , "No se permite eliminar PLANTILLA 01 ni la hoja modelo PLANTILLA. No hay una plantilla adicional para eliminar."
     nombre = "PLANTILLA " & Format(numero, "00"): fila = numero + 9
     paso = "Obtener hoja " & nombre
@@ -2482,18 +2504,26 @@ Sub EliminarUltimaPlantilla()
     paso = "Revisar mantenimiento de " & nombre
     If EstaEnMantenimiento(wsEliminar) Then Err.Raise 5, , "Finalice el mantenimiento de " & nombre & " antes de eliminarla."
     If RecuperarMantenimientoInterrumpido(wsEliminar) Then Exit Sub
+    RegistrarTiempo "Obtener/revisar plantilla", inicioPaso
+    inicioPaso = CDbl(Timer)
     Set zona = wsMenu.Range("K" & fila & ":L" & fila)
     paso = "Comprobar rango MENÚ!" & zona.Address(False, False)
     VerificarContenidoRestaurable zona
+    RegistrarTiempo "Rango K:L", inicioPaso
+    inicioPaso = CDbl(Timer)
     paso = "Revisar dependencias de " & nombre
-    VerificarDependenciasPlantilla nombre, fila
+    VerificarDependenciasPlantilla nombre, fila, True
+    RegistrarTiempo "Dependencias", inicioPaso
     mensaje = "Se eliminará únicamente " & nombre & ", asociada a la fila " & fila & " de MENÚ." & vbCrLf
     paso = "Buscar entradas en " & nombre & " (A:G y U:V)"
+    inicioPaso = CDbl(Timer)
     If ObtenerUltimaFilaEntrada(wsEliminar) >= PRIMERA_FILA Then _
         mensaje = mensaje & "ATENCIÓN: contiene datos de entrada que se perderán de este libro." & vbCrLf
+    RegistrarTiempo "Búsqueda de entradas", inicioPaso
     mensaje = mensaje & "Se conservarán las cuentas y la fila de MENÚ. K/L quedarán visualmente vacías." & vbCrLf & _
         "Antes se guardará un respaldo completo en la carpeta de este libro. La recuperación desde ese archivo es manual; no depende de Ctrl+Z." & vbCrLf & "¿Desea continuar?"
     paso = "Solicitar confirmación de eliminación"
+    RegistrarTiempo "TOTAL antes de confirmación", inicioTotal
     If MsgBox(mensaje, vbYesNo + vbExclamation + vbDefaultButton2, "Eliminar " & nombre) <> vbYes Then Exit Sub
     paso = "Ejecutar eliminación confirmada"
     Application.EnableEvents = False: Application.ScreenUpdating = False
@@ -2618,3 +2648,11 @@ Fallo:
     numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
     Err.Raise numeroError, fuenteError, "Validaciones [" & paso & "]: " & descripcionError
 End Sub
+
+Private Function RegistrarTiempo(ByVal etiqueta As String, ByVal inicio As Double, Optional ByVal imprimir As Boolean = True) As Double
+    Dim duracion As Double
+    duracion = CDbl(Timer) - inicio
+    If duracion < 0 Then duracion = duracion + 86400#
+    If imprimir Then Debug.Print etiqueta & ": " & Format(duracion, "0.000") & " s"
+    RegistrarTiempo = duracion
+End Function
