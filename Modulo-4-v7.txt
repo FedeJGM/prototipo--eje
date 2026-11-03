@@ -2324,12 +2324,11 @@ Private Sub VerificarTextoDependencia(ByVal texto As String, ByVal nombre As Str
     Loop
 End Sub
 
-Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As Long, Optional ByVal medir As Boolean = False)
-    Dim ws As Worksheet, menu As Worksheet, celda As Range, primera As String, patron As Variant
+Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As Long)
+    Dim ws As Worksheet, menu As Worksheet
     Dim marca As Name, validaciones As Range, area As Range, columna As Range, regla As Object, valor As Variant
     Dim grafico As ChartObject, serie As Series, tabla As PivotTable, vinculo As Hyperlink, hojaGrafico As Chart
     Dim paso As String, numeroError As Long, descripcionError As String, fuenteError As String, indiceRegla As Long, gruposValidacion As Long
-    Dim inicioHoja As Double, inicioFase As Double, tiempoF As Double, tiempoV As Double, tiempoFC As Double, tiempoOtros As Double
     On Error GoTo Fallo
     paso = "Localizar MENÚ para revisar dependencias"
     Set menu = ObtenerHojaMenu()
@@ -2338,28 +2337,8 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
     paso = "Recorrer hojas del libro"
     For Each ws In ThisWorkbook.Worksheets
         If StrComp(ws.Name, nombre, vbTextCompare) <> 0 Then
-            If medir Then inicioHoja = CDbl(Timer): inicioFase = inicioHoja
-            'Buscar únicamente fórmulas de riesgo, sin recorrer millones de celdas una por una.
-            For Each patron In Array("*" & nombre & "*", "*#REF!*", "*INDIRECT*", "*EVALUATE(*", "*:*!")
-                paso = "Buscar fórmulas en " & ws.Name & " (patrón " & CStr(patron) & ")"
-                Set celda = ws.Cells.Find(What:=patron, After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
-                    LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False, SearchFormat:=False)
-                If Not celda Is Nothing Then
-                    primera = celda.Address
-                    Do
-                        paso = "Leer fórmula de " & ws.Name & "!" & celda.Address(False, False)
-                        If celda.HasFormula Then
-                            If Not ((ws Is menu) And celda.Row = fila And (celda.Column = 11 Or celda.Column = 12)) Then _
-                                VerificarTextoDependencia CStr(celda.Formula), nombre, ws.Name & "!" & celda.Address(False, False)
-                        End If
-                        paso = "Continuar búsqueda de fórmulas en " & ws.Name & " (patrón " & CStr(patron) & ")"
-                        Set celda = ws.Cells.Find(What:=patron, After:=celda, LookIn:=xlFormulas, _
-                            LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False, SearchFormat:=False)
-                        If celda Is Nothing Then Exit Do
-                    Loop While celda.Address <> primera
-                End If
-            Next patron
-            If medir Then tiempoF = RegistrarTiempo("", inicioFase, False): inicioFase = CDbl(Timer)
+            paso = "Revisar fórmulas de " & ws.Name
+            VerificarFormulasDependientes ws, menu, nombre, fila
             paso = "Localizar validaciones de " & ws.Name
             Set validaciones = Nothing
             On Error Resume Next
@@ -2375,7 +2354,6 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
                     Next columna
                 Next area
             End If
-            If medir Then tiempoV = RegistrarTiempo("", inicioFase, False): inicioFase = CDbl(Timer)
             paso = "Recorrer formatos condicionales de " & ws.Name
             indiceRegla = 0
             For Each regla In ws.Cells.FormatConditions
@@ -2391,7 +2369,6 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
                     End If
                 End If
             Next regla
-            If medir Then tiempoFC = RegistrarTiempo("", inicioFase, False): inicioFase = CDbl(Timer)
             paso = "Recorrer gráficos de " & ws.Name
             For Each grafico In ws.ChartObjects
                 paso = "Leer series del gráfico " & ws.Name & ": " & grafico.Name
@@ -2410,17 +2387,8 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
             For Each vinculo In ws.Hyperlinks
                 VerificarTextoDependencia vinculo.SubAddress, nombre, "hipervínculo de " & ws.Name
             Next vinculo
-            If medir Then
-                tiempoOtros = RegistrarTiempo("", inicioFase, False)
-                Debug.Print "Hoja " & ws.Name & " | F=" & Format(tiempoF, "0.000") & " s" & _
-                    " | V=" & Format(tiempoV, "0.000") & " s" & _
-                    " | FC=" & Format(tiempoFC, "0.000") & " s" & _
-                    " | Otros=" & Format(tiempoOtros, "0.000") & " s" & _
-                    " | Total=" & Format(RegistrarTiempo("", inicioHoja, False), "0.000") & " s"
-            End If
         End If
     Next ws
-    If medir Then inicioFase = CDbl(Timer)
     paso = "Recorrer hojas de gráficos"
     For Each hojaGrafico In ThisWorkbook.Charts
         paso = "Leer series de la hoja de gráfico " & hojaGrafico.Name
@@ -2436,7 +2404,6 @@ Private Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As
             InStr(1, marca.Name, nombre & "!", vbTextCompare) <> 1 Then _
             VerificarTextoDependencia marca.RefersTo, nombre, "nombre definido " & marca.Name
     Next marca
-    If medir Then RegistrarTiempo "Dependencias globales (nombres/hojas de gráficos)", inicioFase
     Exit Sub
 Fallo:
     numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
@@ -2473,7 +2440,6 @@ Sub EliminarUltimaPlantilla()
     Dim eventos As Boolean, pantalla As Boolean, alertas As Boolean, ventanas As Boolean
     Dim anteriores As Variant, cambioMenu As Boolean, eliminada As Boolean, detalle As String
     Dim paso As String, numeroError As Long, descripcionError As String
-    Dim inicioTotal As Double, inicioPaso As Double
     eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating: alertas = Application.DisplayAlerts
     ventanas = ThisWorkbook.ProtectWindows
     On Error GoTo Fallo
@@ -2487,16 +2453,10 @@ Sub EliminarUltimaPlantilla()
         Exit Sub
     End If
     clave = vbNullString
-    inicioTotal = CDbl(Timer): inicioPaso = inicioTotal
-    Debug.Print "--- Medición previa en segundos; responder NO a la confirmación ---"
     paso = "Revisar mantenimiento de MENÚ"
     If RecuperarMantenimientoInterrumpido(wsMenu) Then Exit Sub
-    RegistrarTiempo "Mantenimiento MENÚ", inicioPaso
-    inicioPaso = CDbl(Timer)
     paso = "Comprobar secuencia de plantillas"
     numero = VerificarSecuenciaPlantillas()
-    RegistrarTiempo "Secuencia", inicioPaso
-    inicioPaso = CDbl(Timer)
     If numero <= 1 Then Err.Raise 5, , "No se permite eliminar PLANTILLA 01 ni la hoja modelo PLANTILLA. No hay una plantilla adicional para eliminar."
     nombre = "PLANTILLA " & Format(numero, "00"): fila = numero + 9
     paso = "Obtener hoja " & nombre
@@ -2504,26 +2464,18 @@ Sub EliminarUltimaPlantilla()
     paso = "Revisar mantenimiento de " & nombre
     If EstaEnMantenimiento(wsEliminar) Then Err.Raise 5, , "Finalice el mantenimiento de " & nombre & " antes de eliminarla."
     If RecuperarMantenimientoInterrumpido(wsEliminar) Then Exit Sub
-    RegistrarTiempo "Obtener/revisar plantilla", inicioPaso
-    inicioPaso = CDbl(Timer)
     Set zona = wsMenu.Range("K" & fila & ":L" & fila)
     paso = "Comprobar rango MENÚ!" & zona.Address(False, False)
     VerificarContenidoRestaurable zona
-    RegistrarTiempo "Rango K:L", inicioPaso
-    inicioPaso = CDbl(Timer)
     paso = "Revisar dependencias de " & nombre
-    VerificarDependenciasPlantilla nombre, fila, True
-    RegistrarTiempo "Dependencias", inicioPaso
+    VerificarDependenciasPlantilla nombre, fila
     mensaje = "Se eliminará únicamente " & nombre & ", asociada a la fila " & fila & " de MENÚ." & vbCrLf
     paso = "Buscar entradas en " & nombre & " (A:G y U:V)"
-    inicioPaso = CDbl(Timer)
     If ObtenerUltimaFilaEntrada(wsEliminar) >= PRIMERA_FILA Then _
         mensaje = mensaje & "ATENCIÓN: contiene datos de entrada que se perderán de este libro." & vbCrLf
-    RegistrarTiempo "Búsqueda de entradas", inicioPaso
     mensaje = mensaje & "Se conservarán las cuentas y la fila de MENÚ. K/L quedarán visualmente vacías." & vbCrLf & _
         "Antes se guardará un respaldo completo en la carpeta de este libro. La recuperación desde ese archivo es manual; no depende de Ctrl+Z." & vbCrLf & "¿Desea continuar?"
     paso = "Solicitar confirmación de eliminación"
-    RegistrarTiempo "TOTAL antes de confirmación", inicioTotal
     If MsgBox(mensaje, vbYesNo + vbExclamation + vbDefaultButton2, "Eliminar " & nombre) <> vbYes Then Exit Sub
     paso = "Ejecutar eliminación confirmada"
     Application.EnableEvents = False: Application.ScreenUpdating = False
@@ -2649,10 +2601,71 @@ Fallo:
     Err.Raise numeroError, fuenteError, "Validaciones [" & paso & "]: " & descripcionError
 End Sub
 
-Private Function RegistrarTiempo(ByVal etiqueta As String, ByVal inicio As Double, Optional ByVal imprimir As Boolean = True) As Double
-    Dim duracion As Double
-    duracion = CDbl(Timer) - inicio
-    If duracion < 0 Then duracion = duracion + 86400#
-    If imprimir Then Debug.Print etiqueta & ": " & Format(duracion, "0.000") & " s"
-    RegistrarTiempo = duracion
-End Function
+Private Sub VerificarFormulasDependientes(ByVal ws As Worksheet, ByVal menu As Worksheet, ByVal nombre As String, ByVal fila As Long)
+    Dim formulas As Range, area As Range, bloque As Range, estado As Variant, datos As Variant, unico(1 To 1, 1 To 1) As Variant
+    Dim columnas As Long, filasBloque As Long, inicio As Long, cantidad As Long, i As Long, j As Long
+    Dim filaBase As Long, columnaBase As Long, filaActual As Long, columnaActual As Long, dosPuntos As Long, esMenu As Boolean, referenciaMultiple As Boolean
+    Dim texto As String, paso As String, lugar As String, nombreHoja As String, numeroError As Long, descripcionError As String, fuenteError As String
+    On Error GoTo Fallo
+    nombreHoja = ws.Name: esMenu = (ws Is menu)
+    paso = "Localizar fórmulas de " & nombreHoja
+    On Error Resume Next
+    Set formulas = ws.Cells.SpecialCells(xlCellTypeFormulas)
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    Err.Clear
+    On Error GoTo Fallo
+    If numeroError <> 0 And numeroError <> 1004 Then Err.Raise numeroError, fuenteError, descripcionError
+    If numeroError = 1004 Or formulas Is Nothing Then
+        paso = "Comprobar ausencia de fórmulas de " & nombreHoja
+        estado = ws.Cells.HasFormula
+        If VarType(estado) = vbBoolean Then
+            If estado = False Then Exit Sub
+        End If
+        If numeroError <> 0 Then Err.Raise numeroError, fuenteError, descripcionError
+        Err.Raise 5, , "Excel no devolvió las fórmulas y no se pudo demostrar que la hoja estuviera libre de ellas."
+    End If
+    For Each area In formulas.Areas
+        columnas = area.Columns.Count: columnaBase = area.Column
+        filasBloque = TAMANO_BLOQUE \ columnas
+        If filasBloque < 1 Then filasBloque = 1
+        For inicio = 1 To area.Rows.Count Step filasBloque
+            cantidad = filasBloque
+            If inicio + cantidad - 1 > area.Rows.Count Then cantidad = area.Rows.Count - inicio + 1
+            filaBase = area.Row + inicio - 1
+            Set bloque = area.Cells(inicio, 1).Resize(cantidad, columnas)
+            paso = "Leer bloque .Formula"
+            datos = bloque.Formula
+            If Not IsArray(datos) Then
+                If cantidad <> 1 Or columnas <> 1 Then Err.Raise 5, , "La lectura de fórmulas no devolvió el bloque completo."
+                unico(1, 1) = datos: datos = unico
+            End If
+            For i = 1 To cantidad
+                filaActual = filaBase + i - 1
+                For j = 1 To columnas
+                    columnaActual = columnaBase + j - 1
+                    If Not (esMenu And filaActual = fila And (columnaActual = 11 Or columnaActual = 12)) Then
+                        If VarType(datos(i, j)) <> vbString Then
+                            paso = "Leer fórmula de " & nombreHoja & "!" & ws.Cells(filaActual, columnaActual).Address(False, False)
+                            Err.Raise 5, , "No se pudo leer el texto de una fórmula; no se continuará sin inspeccionarla."
+                        End If
+                        texto = CStr(datos(i, j))
+                        dosPuntos = InStr(1, texto, ":", vbBinaryCompare): referenciaMultiple = False
+                        If dosPuntos > 0 Then referenciaMultiple = InStr(dosPuntos + 1, texto, "!", vbBinaryCompare) > 0
+                        If InStr(1, texto, nombre, vbTextCompare) > 0 Or InStr(1, texto, "#REF!", vbTextCompare) > 0 Or _
+                            InStr(1, texto, "INDIRECT", vbTextCompare) > 0 Or InStr(1, texto, "EVALUATE(", vbTextCompare) > 0 Or _
+                            referenciaMultiple Then
+                            lugar = nombreHoja & "!" & ws.Cells(filaActual, columnaActual).Address(False, False)
+                            paso = "Revisar fórmula de " & lugar
+                            VerificarTextoDependencia texto, nombre, lugar
+                        End If
+                    End If
+                Next j
+            Next i
+        Next inicio
+    Next area
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    If paso = "Leer bloque .Formula" Then paso = paso & " de " & nombreHoja & " (fila " & filaBase & ", columna " & columnaBase & ")"
+    Err.Raise numeroError, fuenteError, "Fórmulas [" & paso & "]: " & descripcionError
+End Sub
