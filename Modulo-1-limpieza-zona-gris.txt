@@ -1,0 +1,44 @@
+﻿Option Explicit
+
+Public Sub BorrarDatos()
+    Const PRIMERA_FILA_DATOS As Long = 12
+    Dim hoja As Worksheet, ultimaAnterior As Long
+    Dim eventosAnteriores As Boolean, pantallaAnterior As Boolean, detalle As String
+
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    Set hoja = ActiveSheet
+    If Not (hoja.Parent Is ThisWorkbook) Then Exit Sub
+    If EsHojaTecnica(hoja.Name) Then Exit Sub
+    If RecuperarMantenimientoInterrumpido(hoja) Then Exit Sub
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+
+    On Error GoTo SalidaSegura
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    'Recordar el tramo utilizado antes del borrado; no es una limpieza del sobrante histórico.
+    ultimaAnterior = ObtenerUltimaFilaEntrada(hoja)
+
+    ' Campos de entrada de la nueva plantilla.
+    hoja.Range("A" & PRIMERA_FILA_DATOS & ":G" & hoja.Rows.Count).ClearContents
+    hoja.Range("U" & PRIMERA_FILA_DATOS & ":V" & hoja.Rows.Count).ClearContents
+
+    'Los eventos están desactivados: llamar al mismo auxiliar que usa el borrado manual.
+    If ultimaAnterior >= PRIMERA_FILA_DATOS Then LimpiarFormulasFinalesVacias hoja, PRIMERA_FILA_DATOS, ultimaAnterior, 0
+    PrepararFilasEntrada hoja, PRIMERA_FILA_DATOS, PRIMERA_FILA_DATOS
+    ActualizarRespaldoDespuesDeEntrada hoja, hoja.Range("A12:G12")
+
+SalidaSegura:
+    detalle = Err.Description
+    On Error Resume Next
+    Err.Clear
+    Application.EnableEvents = eventosAnteriores
+    If Err.Number <> 0 Then detalle = detalle & " No se restauraron los eventos: " & Err.Description
+    Err.Clear
+    Application.ScreenUpdating = pantallaAnterior
+    If Err.Number <> 0 Then detalle = detalle & " No se restauró la pantalla: " & Err.Description
+    On Error GoTo 0
+
+    If detalle <> "" Then
+        MsgBox "No fue posible borrar los datos: " & detalle, vbExclamation
+    End If
+End Sub
