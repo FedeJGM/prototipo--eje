@@ -1,0 +1,188 @@
+﻿Option Explicit
+Option Private Module
+'NeteoRespaldos: captura/restauración de contenido y respaldo completo de archivo.
+'Auxiliares internos sin estado de autorización; instalar junto con Módulo 4 corte 2.
+'Módulo 4 conserva la propiedad y el ciclo de vida de los respaldos temporales.
+'Los límites de encabezados y de bloques se reciben explícitamente; no duplicar constantes.
+'Las APIs Public son para el mismo proyecto; no asignarlas a botones.
+
+'El libro temporal separa contenido, fórmulas como texto y formato/validación en tres hojas.
+'El controlador conserva su referencia y decide su cierre; no es una copia persistente en disco.
+Public Function CrearRespaldo() As Workbook
+    Dim wb As Workbook
+    Set wb = Workbooks.Add(xlWBATWorksheet)
+    On Error GoTo Fallo
+    wb.Worksheets.Add After:=wb.Worksheets(wb.Worksheets.Count)
+    wb.Worksheets.Add After:=wb.Worksheets(wb.Worksheets.Count)
+    wb.Worksheets(1).Name = "Contenido"
+    wb.Worksheets(2).Name = "FormulasComoTexto"
+    wb.Worksheets(3).Name = "FormatoYValidacion"
+    wb.Windows(1).Visible = False
+    Set CrearRespaldo = wb
+    Exit Function
+Fallo:
+    Dim descripcion As String
+    descripcion = Err.Description
+    On Error Resume Next
+    wb.Close SaveChanges:=False
+    On Error GoTo 0
+    Err.Raise 5, , "No se pudo crear el respaldo temporal: " & descripcion
+End Function
+
+Private Function TextosLiterales(ByVal datos As Variant) As Variant
+    Dim f As Long, c As Long
+    'El apóstrofo impide que Excel evalúe como fórmula un texto que comienza con =.
+    If IsArray(datos) Then
+        For f = LBound(datos, 1) To UBound(datos, 1)
+            For c = LBound(datos, 2) To UBound(datos, 2)
+                If VarType(datos(f, c)) = vbString Then datos(f, c) = "'" & datos(f, c)
+            Next c
+        Next f
+    ElseIf VarType(datos) = vbString Then
+        datos = "'" & datos
+    End If
+    TextosLiterales = datos
+End Function
+
+'El controlador decide rango y permisos; este auxiliar no cambia eventos ni protección.
+'El contexto recibido conserva límites de encabezados y bloques sin compartir estado de autorización.
+Public Sub CapturarContenido(ByVal zona As Range, ByVal respaldo As Workbook, ByVal esHojaMenu As Boolean, ByVal primeraFilaEntrada As Long, ByVal tamanoBloque As Long)
+    Dim area As Range, bloque As Range, formulas As Range, parte As Range
+    Dim inicio As Long, cantidad As Long, limite As Long
+    Dim cabecera As Range, datos As Range, celda As Range, base As Range
+    limite = primeraFilaEntrada
+    If esHojaMenu Then limite = 10
+    For Each area In zona.Areas
+        Set cabecera = Intersect(area, area.Parent.Rows("1:" & (limite - 1)))
+        If Not cabecera Is Nothing Then
+            For Each celda In cabecera.Cells
+                Set base = celda
+                If celda.MergeCells Then Set base = celda.MergeArea.Cells(1, 1)
+                respaldo.Worksheets(1).Range(base.Address).Value2 = TextosLiterales(base.Value2)
+                respaldo.Worksheets(2).Range(base.Address).ClearContents
+                If base.HasFormula Then respaldo.Worksheets(2).Range(base.Address).Value2 = TextosLiterales(base.FormulaR1C1)
+            Next celda
+        End If
+        Set datos = Intersect(area, area.Parent.Rows(limite & ":" & area.Parent.Rows.Count))
+        If Not datos Is Nothing Then
+        For inicio = 1 To datos.Rows.Count Step tamanoBloque
+            cantidad = Application.Min(tamanoBloque, datos.Rows.Count - inicio + 1)
+            Set bloque = datos.Cells(inicio, 1).Resize(cantidad, datos.Columns.Count)
+            respaldo.Worksheets(1).Range(bloque.Address).Value2 = TextosLiterales(bloque.Value2)
+            respaldo.Worksheets(2).Range(bloque.Address).ClearContents
+            Set formulas = Nothing
+            If bloque.CountLarge = 1 Then
+                If bloque.HasFormula Then Set formulas = bloque
+            Else
+                On Error Resume Next
+                Set formulas = bloque.SpecialCells(xlCellTypeFormulas)
+                On Error GoTo 0
+            End If
+            If Not formulas Is Nothing Then Set formulas = Intersect(bloque, formulas)
+            If Not formulas Is Nothing Then
+                For Each parte In formulas.Areas
+                    respaldo.Worksheets(2).Range(parte.Address).Value2 = TextosLiterales(parte.FormulaR1C1)
+                Next parte
+            End If
+        Next inicio
+        End If
+    Next area
+End Sub
+
+'Recupera contenido y fórmulas del snapshot existente; no reconstruye un respaldo perdido.
+'Su controlador conserva la responsabilidad sobre formatos, validaciones, protección y salidas.
+Public Sub RestaurarContenido(ByVal zona As Range, ByVal respaldo As Workbook, ByVal esHojaMenu As Boolean, ByVal primeraFilaEntrada As Long, ByVal tamanoBloque As Long)
+    Dim area As Range, bloque As Range, formulas As Range, parte As Range, origen As Range
+    Dim inicio As Long, cantidad As Long, limite As Long
+    Dim cabecera As Range, datos As Range, celda As Range, base As Range
+    If respaldo Is Nothing Then Err.Raise 5, , "No existe un respaldo fiable para recuperar el contenido."
+    limite = primeraFilaEntrada
+    If esHojaMenu Then limite = 10
+    For Each area In zona.Areas
+        Set cabecera = Intersect(area, area.Parent.Rows("1:" & (limite - 1)))
+        If Not cabecera Is Nothing Then
+            For Each celda In cabecera.Cells
+                Set base = celda
+                If celda.MergeCells Then Set base = celda.MergeArea.Cells(1, 1)
+                If VarType(respaldo.Worksheets(2).Range(base.Address).Value2) = vbString Then
+                    base.FormulaR1C1 = respaldo.Worksheets(2).Range(base.Address).Value2
+                Else
+                    base.Value2 = TextosLiterales(respaldo.Worksheets(1).Range(base.Address).Value2)
+                End If
+            Next celda
+        End If
+        Set datos = Intersect(area, area.Parent.Rows(limite & ":" & area.Parent.Rows.Count))
+        If Not datos Is Nothing Then
+        For inicio = 1 To datos.Rows.Count Step tamanoBloque
+            cantidad = Application.Min(tamanoBloque, datos.Rows.Count - inicio + 1)
+            Set bloque = datos.Cells(inicio, 1).Resize(cantidad, datos.Columns.Count)
+            bloque.Value2 = TextosLiterales(respaldo.Worksheets(1).Range(bloque.Address).Value2)
+            Set origen = respaldo.Worksheets(2).Range(bloque.Address)
+            Set formulas = Nothing
+            If origen.CountLarge = 1 Then
+                If VarType(origen.Value2) = vbString Then Set formulas = origen
+            Else
+                On Error Resume Next
+                Set formulas = origen.SpecialCells(xlCellTypeConstants, xlTextValues)
+                On Error GoTo 0
+            End If
+            If Not formulas Is Nothing Then Set formulas = Intersect(origen, formulas)
+            If Not formulas Is Nothing Then
+                For Each parte In formulas.Areas
+                    zona.Parent.Range(parte.Address).FormulaR1C1 = parte.Value2
+                Next parte
+            End If
+        Next inicio
+        End If
+    Next area
+End Sub
+
+Public Sub VerificarContenidoRestaurable(ByVal zona As Range, Optional ByVal permitirCombinadas As Boolean = False)
+    Dim estado As Variant, tabla As ListObject
+    If Not permitirCombinadas Then
+        estado = zona.MergeCells
+        If IsNull(estado) Then Err.Raise 5, , "El área contiene celdas combinadas; no se habilitará esta operación."
+        If estado Then Err.Raise 5, , "El área contiene celdas combinadas; no se habilitará esta operación."
+    End If
+    estado = zona.HasArray
+    If IsNull(estado) Then Err.Raise 5, , "El área contiene fórmulas matriciales; no se habilitará esta operación."
+    If estado Then Err.Raise 5, , "El área contiene fórmulas matriciales; no se habilitará esta operación."
+    'HasSpill no existe en versiones antiguas de Excel.
+    On Error Resume Next
+    Err.Clear
+    estado = CallByName(zona, "HasSpill", VbGet)
+    If Err.Number <> 0 Then estado = False
+    On Error GoTo 0
+    If IsNull(estado) Then Err.Raise 5, , "El área contiene fórmulas derramadas; no se habilitará esta operación."
+    If estado Then Err.Raise 5, , "El área contiene fórmulas derramadas; no se habilitará esta operación."
+    For Each tabla In zona.Parent.ListObjects
+        If Not Intersect(zona, tabla.Range) Is Nothing Then Err.Raise 5, , "El área pertenece a una tabla de Excel; no se habilitará esta operación."
+    Next tabla
+End Sub
+
+'SaveCopyAs crea el archivo previo a la eliminación sin guardar automáticamente el original.
+'El llamador solo continúa si se comprueba una copia local no vacía con nombre disponible.
+Public Function GuardarRespaldoPlantilla(ByVal nombre As String) As String
+    Dim base As String, extension As String, ruta As String, numero As Long, punto As Long
+    If ThisWorkbook.Path = "" Or ThisWorkbook.ReadOnly Then _
+        Err.Raise 5, , "Guarde primero una copia editable del libro en una carpeta local. No se eliminará ninguna plantilla sin respaldo."
+    If InStr(1, ThisWorkbook.Path, "://", vbTextCompare) > 0 Then _
+        Err.Raise 5, , "Use una copia local del libro para generar el respaldo antes de eliminar la plantilla."
+    punto = InStrRev(ThisWorkbook.Name, ".")
+    If punto = 0 Then Err.Raise 5, , "No se pudo identificar el formato del libro para respaldarlo."
+    extension = Mid(ThisWorkbook.Name, punto)
+    base = ThisWorkbook.Path & Application.PathSeparator & Left(ThisWorkbook.Name, punto - 1) & _
+        "_Respaldo_" & Replace(nombre, " ", "_") & "_" & Format(Now, "yyyymmdd_hhnnss")
+    ruta = base & extension
+    Do While Dir(ruta, vbNormal Or vbHidden Or vbSystem Or vbReadOnly Or vbArchive Or vbDirectory) <> ""
+        numero = numero + 1
+        ruta = base & "_" & numero & extension
+    Loop
+    ThisWorkbook.SaveCopyAs ruta
+    If Dir(ruta, vbNormal Or vbHidden Or vbSystem Or vbReadOnly Or vbArchive Or vbDirectory) = "" Then _
+        Err.Raise 5, , "No se pudo comprobar el respaldo. No se eliminó ninguna plantilla."
+    If (GetAttr(ruta) And vbDirectory) <> 0 Or FileLen(ruta) = 0 Then _
+        Err.Raise 5, , "El respaldo no es un archivo válido. No se eliminó ninguna plantilla."
+    GuardarRespaldoPlantilla = ruta
+End Function
+
