@@ -1,0 +1,264 @@
+﻿Option Explicit
+Option Private Module
+'NeteoValidaciones: Validación por bloques, marcado y reglas de Excel; sin estado propio.
+'Módulo interno del mismo proyecto. Instalar junto con Módulo 4 v7 modular.
+'Las APIs Public solo comunican componentes; no asignarlas a botones.
+'La configuración central y las autorizaciones permanecen en Módulo 4.
+
+'Además de contar o marcar errores, la revisión aplica los ajustes de C/G/U ya establecidos.
+'El paso de Clientes a Red exige nombre del catálogo y coincidencia de NIT y oficina.
+'Los wrappers públicos originales siguen en Módulo 4; aquí se procesa el trabajo por bloques.
+Public Function RevisarFilas(ByVal ws As Worksheet, ByVal primeraFila As Long, _
+    ByVal ultimaFila As Long, ByVal marcar As Boolean, ByVal tamanoBloque As Long) As Long
+    Dim inicio As Long, cantidad As Long, i As Long, j As Long
+    Dim datos As Variant, extra As Variant, formulas As Variant
+    Dim malos() As Boolean, cambiaC() As Boolean, cambiaG() As Boolean, cambiaU() As Boolean
+    Dim nuevosC() As Variant, nuevosG() As Variant, nuevosU() As Variant
+    Dim nit As String, oficina As String, tipo As String, fecha1904 As Boolean
+    fecha1904 = ws.Parent.Date1904
+    For inicio = primeraFila To ultimaFila Step tamanoBloque
+        cantidad = Application.Min(tamanoBloque, ultimaFila - inicio + 1)
+        datos = ws.Cells(inicio, 1).Resize(cantidad, 7).Value2
+        extra = ws.Cells(inicio, 21).Resize(cantidad, 2).Value2
+        'Leer A:G mantiene una matriz incluso con una sola fila.
+        formulas = ws.Cells(inicio, 1).Resize(cantidad, 7).Formula
+        ReDim malos(1 To cantidad, 1 To 9)
+        ReDim cambiaC(1 To cantidad): ReDim cambiaG(1 To cantidad): ReDim cambiaU(1 To cantidad)
+        ReDim nuevosC(1 To cantidad, 1 To 1): ReDim nuevosG(1 To cantidad, 1 To 1): ReDim nuevosU(1 To cantidad, 1 To 1)
+        For i = 1 To cantidad
+            If HayDatosEnFila(datos, extra, i) Then
+                tipo = LimpiarTextoValidacion(datos(i, 7))
+                nit = ObtenerNitRed(datos(i, 4))
+                oficina = ObtenerOficinaRed(datos(i, 4))
+                If tipo = "CLIENTES" And nit <> "" Then
+                    If LimpiarTextoValidacion(datos(i, 3)) = nit And LimpiarTextoValidacion(extra(i, 1)) = oficina Then
+                        tipo = "RED": datos(i, 7) = "Red": cambiaG(i) = True: nuevosG(i, 1) = "Red"
+                    End If
+                End If
+                If tipo = "RED" Then
+                    If nit <> "" Then
+                        If LimpiarTextoValidacion(datos(i, 3)) <> nit Then
+                            datos(i, 3) = nit: cambiaC(i) = True: nuevosC(i, 1) = nit
+                        End If
+                        If LimpiarTextoValidacion(extra(i, 1)) <> oficina Then
+                            extra(i, 1) = oficina: cambiaU(i) = True: nuevosU(i, 1) = oficina
+                        End If
+                    Else
+                        malos(i, 4) = True
+                        If IsError(datos(i, 3)) Then
+                            cambiaC(i) = True
+                        Else
+                            cambiaC(i) = (Len(CStr(datos(i, 3))) > 0)
+                        End If
+                        If IsError(extra(i, 1)) Then
+                            cambiaU(i) = True
+                        Else
+                            cambiaU(i) = (Len(CStr(extra(i, 1))) > 0)
+                        End If
+                        datos(i, 3) = Empty: extra(i, 1) = Empty
+                    End If
+                Else
+                    malos(i, 4) = Not EsNombreClienteValido(datos(i, 4))
+                End If
+                malos(i, 1) = Not EsCodigoOficinaValido(datos(i, 1))
+                malos(i, 2) = Not FechaEntradaValida(datos(i, 2), fecha1904)
+                malos(i, 3) = Not EsNitValido(datos(i, 3))
+                malos(i, 5) = Not EsDescripcionPartidaValida(datos(i, 5))
+                malos(i, 6) = Not ValorEntradaValido(datos(i, 6), formulas(i, 6))
+                malos(i, 7) = Not EsTipoClienteValido(datos(i, 7))
+                malos(i, 8) = Not EsOficinaReclasificacionValida(extra(i, 1))
+                malos(i, 9) = Not EsPartidaReclasificarValida(extra(i, 2))
+                If tipo = "CLIENTES" Then
+                    If nit <> "" Then malos(i, 7) = True: malos(i, 4) = True
+                    If EsNitRedCatalogo(datos(i, 3)) Then malos(i, 7) = True: malos(i, 3) = True
+                End If
+                For j = 1 To 9
+                    If malos(i, j) Then RevisarFilas = RevisarFilas + 1
+                Next j
+            End If
+        Next i
+        EscribirCambios ws, 3, inicio, nuevosC, cambiaC, cantidad
+        EscribirCambios ws, 7, inicio, nuevosG, cambiaG, cantidad
+        EscribirCambios ws, 21, inicio, nuevosU, cambiaU, cantidad
+        If marcar Then MarcarErrores ws, inicio, cantidad, malos
+    Next inicio
+End Function
+
+Public Function FechaEntradaValida(ByVal valor As Variant, ByVal fecha1904 As Boolean) As Boolean
+    Dim serial As Double
+    If IsError(valor) Or IsNull(valor) Then Exit Function
+    If Len(Trim(CStr(valor))) = 0 Then Exit Function
+    If IsNumeric(valor) Then
+        serial = CDbl(valor)
+        If fecha1904 Then serial = serial + 1462
+        FechaEntradaValida = (serial >= 1 And serial < CDbl(Date))
+    ElseIf IsDate(valor) Then
+        FechaEntradaValida = (DateValue(valor) < Date)
+    End If
+End Function
+
+Public Function ValorEntradaValido(ByVal valor As Variant, ByVal formula As Variant) As Boolean
+    Dim texto As String, i As Long, puntos As Long, caracter As String
+    If IsError(valor) Or IsError(formula) Then Exit Function
+    If IsNumeric(valor) And VarType(valor) <> vbString Then
+        If Left(CStr(formula), 1) = "=" Then Exit Function
+        ValorEntradaValido = (CDbl(valor) <> 0)
+        Exit Function
+    End If
+    texto = Replace(Replace(Trim(CStr(valor)), Chr(160), ""), " ", "")
+    If Left(texto, 1) = "-" Then texto = Mid(texto, 2)
+    If texto = "" Then Exit Function
+    If Left(texto, 1) = "." Or Right(texto, 1) = "." Then Exit Function
+    For i = 1 To Len(texto)
+        caracter = Mid(texto, i, 1)
+        If caracter = "." Then
+            puntos = puntos + 1
+            If puntos > 1 Then Exit Function
+        ElseIf caracter < "0" Or caracter > "9" Then
+            Exit Function
+        End If
+    Next i
+    ValorEntradaValido = (Val(texto) <> 0)
+End Function
+
+Private Function HayDatosEnFila(ByRef datos As Variant, ByRef adicionales As Variant, ByVal i As Long) As Boolean
+    Dim j As Long
+    For j = 1 To 7
+        If IsError(datos(i, j)) Then HayDatosEnFila = True: Exit Function
+        If Len(CStr(datos(i, j))) > 0 Then HayDatosEnFila = True: Exit Function
+    Next j
+    For j = 1 To 2
+        If IsError(adicionales(i, j)) Then HayDatosEnFila = True: Exit Function
+        If Len(CStr(adicionales(i, j))) > 0 Then HayDatosEnFila = True: Exit Function
+    Next j
+End Function
+
+Private Sub EscribirCambios(ByVal ws As Worksheet, ByVal columna As Long, ByVal inicio As Long, _
+    ByRef valores() As Variant, ByRef cambios() As Boolean, ByVal cantidad As Long)
+    Dim i As Long, primero As Long, j As Long, bloque() As Variant
+    i = 1
+    Do While i <= cantidad
+        If cambios(i) Then
+            primero = i
+            Do While i <= cantidad
+                If Not cambios(i) Then Exit Do
+                i = i + 1
+            Loop
+            ReDim bloque(1 To i - primero, 1 To 1)
+            For j = primero To i - 1
+                bloque(j - primero + 1, 1) = valores(j, 1)
+            Next j
+            ws.Cells(inicio + primero - 1, columna).Resize(i - primero).Value2 = bloque
+            If columna = 7 Then AplicarListaRedesEnCelda ws.Cells(inicio + primero - 1, 4).Resize(i - primero)
+        Else
+            i = i + 1
+        End If
+    Loop
+End Sub
+
+Private Sub MarcarErrores(ByVal ws As Worksheet, ByVal inicio As Long, ByVal cantidad As Long, ByRef malos() As Boolean)
+    Dim columnas As Variant, col As Long, i As Long, primero As Long
+    columnas = Array(1, 2, 3, 4, 5, 6, 7, 21, 22)
+    For col = 1 To 9
+        QuitarRojoEnRango ws.Cells(inicio, columnas(col - 1)).Resize(cantidad)
+        i = 1
+        Do While i <= cantidad
+            If malos(i, col) Then
+                primero = i
+                Do While i <= cantidad
+                    If Not malos(i, col) Then Exit Do
+                    i = i + 1
+                Loop
+                ws.Cells(inicio + primero - 1, columnas(col - 1)).Resize(i - primero).Interior.Color = RGB(255, 0, 0)
+            Else
+                i = i + 1
+            End If
+        Loop
+    Next col
+End Sub
+
+Public Sub QuitarRojoEnRango(ByVal zona As Range)
+    Dim color As Variant, mitad As Long
+    color = zona.Interior.ColorIndex
+    If IsNull(color) Then
+        If zona.Rows.Count > 1 Then
+            mitad = zona.Rows.Count \ 2
+            QuitarRojoEnRango zona.Resize(mitad)
+            QuitarRojoEnRango zona.Offset(mitad).Resize(zona.Rows.Count - mitad)
+        End If
+    ElseIf zona.Interior.Color = RGB(255, 0, 0) Then
+        zona.Interior.ColorIndex = xlColorIndexNone
+    End If
+End Sub
+
+Public Sub ConfigurarReglaEnRango(ByVal ws As Worksheet, ByVal columna As String, ByVal primera As Long, ByVal ultima As Long)
+    Dim zona As Range, separador As String, lista As String
+    Set zona = ws.Range(columna & primera & ":" & columna & ultima)
+    separador = Application.International(xlListSeparator)
+    zona.Validation.Delete
+    With zona.Validation
+        Select Case columna
+            Case "A"
+                .Add Type:=xlValidateWholeNumber, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="1", Formula2:="999"
+                .InputTitle = "Código oficina"
+                .InputMessage = "Ingrese un número entre 1 y 999"
+                .ErrorMessage = "Ingrese un entero de 1 a 999."
+            Case "B"
+                .Add Type:=xlValidateDate, AlertStyle:=xlValidAlertStop, Operator:=xlLess, Formula1:="=TODAY()"
+                zona.NumberFormat = "dd/mm/yyyy"
+                .InputTitle = "Fecha origen partida"
+                .InputMessage = "Ingrese una fecha anterior al dia actual en formato Día/Mes/Año"
+                .ErrorMessage = "Ingrese una fecha anterior al día actual."
+            Case "G", "U", "V"
+                Select Case columna
+                    Case "G": lista = "Clientes,Red"
+                    Case "U": lista = "977,979,995"
+                    Case "V": lista = "Sí,No"
+                End Select
+                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:=Replace(lista, ",", separador)
+                .InCellDropdown = True
+                Select Case columna
+                    Case "G"
+                        .InputTitle = "Tipo Cliente"
+                        .InputMessage = "Seleccione Clientes o Red"
+                    Case "U"
+                        .InputTitle = "Oficina de Reclasificación"
+                        .InputMessage = "Seleccione una oficina válida:  977, 979 o 995"
+                    Case "V"
+                        .InputTitle = "Partida a reclasificar"
+                        .InputMessage = "Seleccione Sí o No. Este campo es obligatorio en las filas con datos."
+                End Select
+                .ErrorMessage = "Seleccione un valor permitido."
+            Case "F"
+                .Add Type:=xlValidateCustom, AlertStyle:=xlValidAlertStop, _
+                    Formula1:="=AND(ISNUMBER(F" & primera & "),F" & primera & "<>0)"
+                .InputTitle = "Valor partida"
+                .InputMessage = "Ingrese un valor numérico diferente de cero. Use punto para decimales."
+                .ErrorMessage = "Ingrese un número distinto de cero."
+        End Select
+        .IgnoreBlank = True: .ShowInput = True: .ShowError = True
+        .ErrorTitle = "Dato inválido"
+    End With
+End Sub
+
+Public Sub PrepararListasRed(ByVal ws As Worksheet, ByVal primera As Long, ByVal ultima As Long, ByVal tamanoBloque As Long)
+    Dim inicio As Long, cantidad As Long, datos As Variant, i As Long, primero As Long, esRed As Boolean
+    For inicio = primera To ultima Step tamanoBloque
+        cantidad = Application.Min(tamanoBloque, ultima - inicio + 1)
+        datos = ws.Cells(inicio, 6).Resize(cantidad, 2).Value2
+        i = 1
+        Do While i <= cantidad
+            primero = i: esRed = (LimpiarTextoValidacion(datos(i, 2)) = "RED")
+            Do While i <= cantidad
+                If (LimpiarTextoValidacion(datos(i, 2)) = "RED") <> esRed Then Exit Do
+                i = i + 1
+            Loop
+            If esRed Then
+                AplicarListaRedesEnCelda ws.Cells(inicio + primero - 1, 4).Resize(i - primero)
+            Else
+                QuitarListaRedesEnCelda ws.Cells(inicio + primero - 1, 4).Resize(i - primero)
+            End If
+        Loop
+    Next inicio
+End Sub
+
