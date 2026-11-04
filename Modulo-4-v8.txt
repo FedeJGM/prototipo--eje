@@ -1,4 +1,4 @@
-﻿Option Explicit
+Option Explicit
 'Módulo 4 v7 modular, corte 2: coordinación, APIs públicas y estado privado original.
 'Paquete completo: este archivo + NeteoValidaciones + NeteoDependencias + NeteoRespaldos.
 'Reemplazar TODO el Módulo 4 existente, sin renombrarlo ni duplicarlo.
@@ -10,7 +10,7 @@
 'Compilar y probar en COPIA; no ejecutar/guardar con el paquete instalado parcialmente.
 'No usar End/Reset durante operaciones.
 
-Public Const CLAVE_HOJA As String = "GPT2026"
+Public Const CLAVE_HOJA As String = "EJEMPLO"
 Private Const PRIMERA_FILA As Long = 12
 Private Const TAMANO_BLOQUE As Long = 10000
 'Estos tres objetos pertenecen al coordinador y solo viven durante la sesión autorizada.
@@ -1415,6 +1415,7 @@ End Sub
 Sub AgregarFilaMenu()
     Dim ws As Worksheet, ultimo As Range, fila As Long, eventos As Boolean, pantalla As Boolean, detalle As String
     Dim claveFila As String, claveComprobada As Boolean
+    Dim celda As Range, filaPreparada As Boolean
     Set ws = ObtenerHojaMenu()
     If ws Is Nothing Then
         MsgBox "No se encontró MENÚ.", vbExclamation
@@ -1450,30 +1451,42 @@ Sub AgregarFilaMenu()
         MsgBox "Las fórmulas modelo K10/L10 deben conservar su referencia a PLANTILLA 01. Revise el modelo antes de agregar filas.", vbExclamation
         Exit Sub
     End If
-    If fila <> 10 And Application.CountA(ws.Range("C" & fila & ":L" & fila)) > 0 Then
-        If MsgBox("La siguiente fila disponible en A/B ya contiene información en C:L. ¿Reemplazar C:L por el modelo de fila 10?", _
-            vbYesNo + vbExclamation + vbDefaultButton2) <> vbYes Then Exit Sub
+    'Una fila ya preparada se conserva; no se decide por el resultado de sus fórmulas.
+    If Application.CountA(ws.Range("C" & fila & ":L" & fila)) > 0 Then
+        For Each celda In ws.Range("C" & fila & ":L" & fila).Cells
+            If Not celda.HasFormula Then
+                MsgBox "La fila " & fila & " tiene una preparación incompleta o contenido inesperado en C:L. Revísela antes de continuar. No se reemplazó su contenido.", vbExclamation
+                Exit Sub
+            End If
+            If InStr(1, celda.Formula, "#REF!", vbTextCompare) > 0 Then
+                MsgBox "La fila " & fila & " contiene una referencia #REF! en " & celda.Address(False, False) & ". Revise sus fórmulas antes de continuar. No se reemplazó su contenido.", vbExclamation
+                Exit Sub
+            End If
+        Next celda
+        filaPreparada = True
     End If
     eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating
     On Error GoTo Fallo
     Application.EnableEvents = False: Application.ScreenUpdating = False
     If Not AutorizarCuentasMenu(ws, claveComprobada) Then GoTo Cancelado
     ws.Unprotect Password:=CLAVE_HOJA
-    If fila <> 10 Then
-        ws.Range("C10:L10").Copy
-        ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteFormulas
-        ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteFormats
-        ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteValidation
-        'Antes de crear la hoja correspondiente, K/L deben verse vacías.
-        ws.Range("K" & fila & ":L" & fila).Formula = "="""""
-    ElseIf Not ExisteHoja("PLANTILLA 01") Then
-        ws.Range("K10").Formula = "=IFERROR(" & Mid(ws.Range("K10").Formula, 2) & ","""")"
-        ws.Range("L10").Formula = "=IFERROR(" & Mid(ws.Range("L10").Formula, 2) & ","""")"
+    If Not filaPreparada Then
+        If fila <> 10 Then
+            ws.Range("C10:L10").Copy
+            ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteFormulas
+            ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteFormats
+            ws.Range("C" & fila & ":L" & fila).PasteSpecial Paste:=xlPasteValidation
+            'Antes de crear la hoja correspondiente, K/L deben verse vacías.
+            ws.Range("K" & fila & ":L" & fila).Formula = "="""""
+        ElseIf Not ExisteHoja("PLANTILLA 01") Then
+            ws.Range("K10").Formula = "=IFERROR(" & Mid(ws.Range("K10").Formula, 2) & ","""")"
+            ws.Range("L10").Formula = "=IFERROR(" & Mid(ws.Range("L10").Formula, 2) & ","""")"
+        End If
     End If
     ws.Range("A" & fila & ":B" & fila).Locked = False
     If EstaEnMantenimiento(ws) Then
         ws.Range("C" & fila & ":L" & fila).Locked = False
-        NeteoRespaldos.CapturarContenido ws.Range("C" & fila & ":L" & fila), respaldoMantenimiento, EsMenu(ws), PRIMERA_FILA, TAMANO_BLOQUE
+        If Not filaPreparada Then NeteoRespaldos.CapturarContenido ws.Range("C" & fila & ":L" & fila), respaldoMantenimiento, EsMenu(ws), PRIMERA_FILA, TAMANO_BLOQUE
     Else
         ws.Range("C" & fila & ":L" & fila).Locked = True
     End If
@@ -1489,6 +1502,8 @@ Salida:
     On Error GoTo 0
     If detalle <> "" Then
         MsgBox "No se completó la fila de MENÚ: " & detalle, vbCritical
+    ElseIf filaPreparada Then
+        MsgBox "La fila " & fila & " ya está preparada. Ingrese las cuentas en A" & fila & " y B" & fila & ". No se reemplazaron sus fórmulas.", vbInformation
     Else
         MsgBox "Fila " & fila & " preparada. Ingrese las cuentas en A/B. No se creó ninguna hoja.", vbInformation
     End If
