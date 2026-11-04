@@ -1,0 +1,303 @@
+﻿Option Explicit
+Option Private Module
+'NeteoDependencias: Inspección de dependencias y resta rectangular; sin estado propio.
+'Módulo interno del mismo proyecto. Instalar junto con Módulo 4 v7 modular.
+'Las APIs Public solo comunican componentes; no asignarlas a botones.
+'La configuración central y las autorizaciones permanecen en Módulo 4.
+
+Public Sub VerificarDependenciasPlantilla(ByVal nombre As String, ByVal fila As Long, ByVal tamanoBloque As Long)
+    Dim ws As Worksheet, menu As Worksheet
+    Dim marca As Name, validaciones As Range, area As Range, columna As Range, regla As Object, valor As Variant
+    Dim grafico As ChartObject, serie As Series, tabla As PivotTable, vinculo As Hyperlink, hojaGrafico As Chart
+    Dim paso As String, numeroError As Long, descripcionError As String, fuenteError As String, indiceRegla As Long, gruposValidacion As Long
+    On Error GoTo Fallo
+    paso = "Localizar MENÚ para revisar dependencias"
+    Set menu = ObtenerHojaMenu()
+    paso = "Contar conexiones del libro"
+    If ThisWorkbook.Connections.Count > 0 Then Err.Raise 5, , "El libro contiene conexiones de datos. Revise sus dependencias antes de crear o eliminar plantillas; no se modificó ninguna."
+    paso = "Recorrer hojas del libro"
+    'Se omite el contenido de la hoja objetivo; los nombres globales y otros elementos siguen su revisión.
+    For Each ws In ThisWorkbook.Worksheets
+        If StrComp(ws.Name, nombre, vbTextCompare) <> 0 Then
+            paso = "Revisar fórmulas de " & ws.Name
+            VerificarFormulasDependientes ws, menu, nombre, fila, tamanoBloque
+            paso = "Localizar validaciones de " & ws.Name
+            Set validaciones = Nothing
+            On Error Resume Next
+            Set validaciones = ws.Cells.SpecialCells(xlCellTypeAllValidation)
+            Err.Clear
+            On Error GoTo Fallo
+            If Not validaciones Is Nothing Then
+                paso = "Recorrer rangos de validación de " & ws.Name
+                For Each area In validaciones.Areas
+                    For Each columna In area.Columns
+                        paso = "Revisar grupos de validación de " & ws.Name & "!" & columna.Address(False, False)
+                        VerificarValidacionesDependientes columna, nombre, gruposValidacion
+                    Next columna
+                Next area
+            End If
+            paso = "Recorrer formatos condicionales de " & ws.Name
+            indiceRegla = 0
+            For Each regla In ws.Cells.FormatConditions
+                indiceRegla = indiceRegla + 1
+                paso = "Leer FormatCondition.Type de " & ws.Name & ", regla " & indiceRegla
+                If regla.Type = xlExpression Or regla.Type = xlCellValue Then
+                    paso = "Leer FormatCondition.Formula1 de " & ws.Name & ", regla " & indiceRegla
+                    VerificarTextoDependencia CStr(regla.Formula1), nombre, "formato condicional de " & ws.Name
+                    If regla.Type = xlCellValue Then
+                        paso = "Leer FormatCondition.Formula2 de " & ws.Name & ", regla " & indiceRegla
+                        If regla.Operator = xlBetween Or regla.Operator = xlNotBetween Then _
+                            VerificarTextoDependencia CStr(regla.Formula2), nombre, "formato condicional de " & ws.Name
+                    End If
+                End If
+            Next regla
+            paso = "Recorrer gráficos de " & ws.Name
+            For Each grafico In ws.ChartObjects
+                paso = "Leer series del gráfico " & ws.Name & ": " & grafico.Name
+                For Each serie In grafico.Chart.FullSeriesCollection
+                    VerificarTextoDependencia serie.Formula, nombre, "gráfico " & ws.Name & ": " & grafico.Name
+                Next serie
+            Next grafico
+            paso = "Recorrer tablas dinámicas de " & ws.Name
+            For Each tabla In ws.PivotTables
+                paso = "Leer PivotCache.SourceData de " & ws.Name & ": " & tabla.Name
+                valor = tabla.PivotCache.SourceData
+                If IsArray(valor) Then Err.Raise 5, , "Revise la fuente múltiple de la tabla dinámica " & tabla.Name & " antes de modificar plantillas."
+                VerificarTextoDependencia CStr(valor), nombre, "tabla dinámica " & ws.Name & ": " & tabla.Name
+            Next tabla
+            paso = "Leer destinos de hipervínculos de " & ws.Name
+            For Each vinculo In ws.Hyperlinks
+                VerificarTextoDependencia vinculo.SubAddress, nombre, "hipervínculo de " & ws.Name
+            Next vinculo
+        End If
+    Next ws
+    paso = "Recorrer hojas de gráficos"
+    For Each hojaGrafico In ThisWorkbook.Charts
+        paso = "Leer series de la hoja de gráfico " & hojaGrafico.Name
+        For Each serie In hojaGrafico.FullSeriesCollection
+            VerificarTextoDependencia serie.Formula, nombre, "hoja de gráfico " & hojaGrafico.Name
+        Next serie
+    Next hojaGrafico
+    paso = "Recorrer nombres definidos del libro"
+    For Each marca In ThisWorkbook.Names
+        paso = "Leer RefersTo del nombre " & marca.Name
+        'Los nombres locales de la hoja eliminada desaparecen con ella; los globales no.
+        If InStr(1, marca.Name, "'" & nombre & "'!", vbTextCompare) <> 1 And _
+            InStr(1, marca.Name, nombre & "!", vbTextCompare) <> 1 Then _
+            VerificarTextoDependencia marca.RefersTo, nombre, "nombre definido " & marca.Name
+    Next marca
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    Err.Raise numeroError, fuenteError, "Dependencias [" & paso & "]: " & descripcionError
+End Sub
+
+Private Sub VerificarTextoDependencia(ByVal texto As String, ByVal nombre As String, ByVal lugar As String)
+    Dim inicio As Long, signo As Long, posicion As Long, referencia As String, caracter As String
+    If InStr(1, texto, "#REF!", vbTextCompare) > 0 Then _
+        Err.Raise 5, , "Existe una referencia rota en " & lugar & ". Revísela antes de crear o eliminar plantillas; no se reparará automáticamente."
+    If InStr(1, texto, "INDIRECT", vbTextCompare) > 0 Or InStr(1, texto, "EVALUATE(", vbTextCompare) > 0 Then _
+        Err.Raise 5, , "No se puede verificar con seguridad la referencia dinámica de " & lugar & ". No se modificó ninguna plantilla."
+    If InStr(1, texto, nombre & "'!", vbTextCompare) > 0 Or InStr(1, texto, nombre & "!", vbTextCompare) > 0 Then _
+        Err.Raise 5, , "La plantilla " & nombre & " tiene una referencia en " & lugar & ". No se modificará hasta revisar esa dependencia."
+    signo = InStr(1, texto, "!")
+    Do While signo > 0
+        referencia = Left(texto, signo - 1)
+        If Right(referencia, 1) = "'" Then
+            referencia = Left(referencia, Len(referencia) - 1)
+            posicion = InStrRev(referencia, "'")
+            referencia = Mid(referencia, posicion + 1)
+        Else
+            posicion = Len(referencia)
+            Do While posicion > 0
+                caracter = Mid(referencia, posicion, 1)
+                If InStr(1, "=+-*/^&(),;<> " & vbTab, caracter, vbBinaryCompare) > 0 Then Exit Do
+                posicion = posicion - 1
+            Loop
+            referencia = Mid(referencia, posicion + 1)
+        End If
+        'Una ruta externa puede contener C:; solo importa la parte después de ].
+        posicion = InStrRev(referencia, "]")
+        If posicion > 0 Then referencia = Mid(referencia, posicion + 1)
+        If InStr(1, referencia, ":", vbBinaryCompare) > 0 Then _
+            Err.Raise 5, , "Revise la referencia entre varias hojas en " & lugar & " antes de modificar plantillas."
+        signo = InStr(signo + 1, texto, "!")
+    Loop
+End Sub
+
+Private Sub VerificarValidacionesDependientes(ByVal zona As Range, ByVal nombre As String, ByRef grupos As Long)
+    Dim pendientes As Collection, bloque As Range, iguales As Range, restantes As Range, parte As Range, primera As Range
+    Dim tipo As Variant, operador As Variant, valor As Variant, paso As String
+    Dim numeroError As Long, descripcionError As String, fuenteError As String
+    Set pendientes = New Collection
+    pendientes.Add zona
+    On Error GoTo Fallo
+    Do While pendientes.Count > 0
+        Set bloque = pendientes(pendientes.Count)
+        pendientes.Remove pendientes.Count
+        paso = "Agrupar validaciones de " & bloque.Parent.Name & "!" & bloque.Address(False, False)
+        grupos = grupos + 1
+        If grupos > 8192 Then Err.Raise 5, , "La revisión encontró demasiados grupos de validación. Debe revisar y consolidar las validaciones antes de eliminar; no se omitirá ninguna. Este límite es de fragmentación, no de filas de datos."
+        Set primera = bloque.Cells(1, 1)
+        If bloque.CountLarge = 1 Then
+            Set iguales = bloque
+        Else
+            Set iguales = bloque.SpecialCells(xlCellTypeSameValidation)
+            Set iguales = Intersect(bloque, iguales)
+        End If
+        If iguales Is Nothing Then Err.Raise 5, , "Excel no identificó un grupo de validación dentro del rango."
+        If Intersect(primera, iguales) Is Nothing Then Err.Raise 5, , "El grupo de validación no incluye la primera celda pendiente."
+        If iguales.Areas.Count > 256 Then Err.Raise 5, , "Las validaciones están muy fragmentadas. Debe revisar y consolidar sus áreas antes de eliminar; no se omitirá ninguna regla."
+        'La celda representa un grupo completo identificado por Excel, no una muestra de sus extremos.
+        paso = "Leer Validation.Type de " & primera.Parent.Name & "!" & primera.Address(False, False)
+        tipo = primera.Validation.Type
+        If IsNull(tipo) Or IsEmpty(tipo) Then Err.Raise 5, , "No se pudo identificar el tipo de validación de esa celda."
+        paso = "Leer Validation.Formula1 de " & primera.Parent.Name & "!" & primera.Address(False, False)
+        valor = primera.Validation.Formula1
+        If IsNull(valor) Then Err.Raise 5, , "No se pudo leer el primer criterio de validación de esa celda."
+        VerificarTextoDependencia CStr(valor), nombre, "validación " & primera.Parent.Name & "!" & primera.Address(False, False)
+        'Listas y fórmulas personalizadas no utilizan Formula2; solo se lee cuando el operador la requiere.
+        Select Case tipo
+            Case xlValidateWholeNumber, xlValidateDecimal, xlValidateDate, xlValidateTime, xlValidateTextLength
+                paso = "Leer Validation.Operator de " & primera.Parent.Name & "!" & primera.Address(False, False)
+                operador = primera.Validation.Operator
+                If IsNull(operador) Then Err.Raise 5, , "No se pudo leer el operador de validación de esa celda."
+                If operador = xlBetween Or operador = xlNotBetween Then
+                    paso = "Leer Validation.Formula2 de " & primera.Parent.Name & "!" & primera.Address(False, False)
+                    valor = primera.Validation.Formula2
+                    If IsNull(valor) Then Err.Raise 5, , "No se pudo leer el segundo criterio de validación de esa celda."
+                    VerificarTextoDependencia CStr(valor), nombre, "validación " & primera.Parent.Name & "!" & primera.Address(False, False)
+                End If
+            Case xlValidateInputOnly, xlValidateList, xlValidateCustom
+                'Solo entrada devuelve el primer criterio vacío; sus mensajes no se modifican.
+            Case Else
+                Err.Raise 5, , "Tipo de validación no reconocido. No se continuará sin revisar esa regla."
+        End Select
+        paso = "Comprobar cobertura de validaciones de " & bloque.Parent.Name & "!" & bloque.Address(False, False)
+        Set restantes = bloque
+        For Each parte In iguales.Areas
+            If restantes Is Nothing Then Err.Raise 5, , "El grupo de validación tiene áreas inconsistentes."
+            Set restantes = ExcluirZona(restantes, parte)
+        Next parte
+        If restantes Is Nothing Then
+            If iguales.CountLarge <> bloque.CountLarge Then Err.Raise 5, , "No se comprobó la cobertura completa del grupo de validación."
+        Else
+            If restantes.CountLarge >= bloque.CountLarge Then Err.Raise 5, , "La revisión de validaciones no avanzó; se detuvo sin eliminar."
+            If restantes.CountLarge + iguales.CountLarge <> bloque.CountLarge Then Err.Raise 5, , "La resta de grupos no cubre todas las celdas de validación."
+            If restantes.Areas.Count + pendientes.Count > 256 Then Err.Raise 5, , "Quedan demasiadas áreas de validación diferentes. Debe revisar y consolidar sus reglas antes de eliminar."
+            For Each parte In restantes.Areas
+                pendientes.Add parte
+            Next parte
+        End If
+    Loop
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    Err.Raise numeroError, fuenteError, "Validaciones [" & paso & "]: " & descripcionError
+End Sub
+
+Private Sub VerificarFormulasDependientes(ByVal ws As Worksheet, ByVal menu As Worksheet, ByVal nombre As String, ByVal fila As Long, ByVal tamanoBloque As Long)
+    Dim formulas As Range, area As Range, bloque As Range, estado As Variant, datos As Variant, unico(1 To 1, 1 To 1) As Variant
+    Dim columnas As Long, filasBloque As Long, inicio As Long, cantidad As Long, i As Long, j As Long
+    Dim filaBase As Long, columnaBase As Long, filaActual As Long, columnaActual As Long, dosPuntos As Long, esMenu As Boolean, referenciaMultiple As Boolean
+    Dim texto As String, paso As String, lugar As String, nombreHoja As String, numeroError As Long, descripcionError As String, fuenteError As String
+    On Error GoTo Fallo
+    nombreHoja = ws.Name: esMenu = (ws Is menu)
+    paso = "Localizar fórmulas de " & nombreHoja
+    On Error Resume Next
+    'La búsqueda abarca todas las fórmulas de la hoja, no solo UsedRange ni las filas con entradas.
+    'Los bloques limitan la memoria de lectura, no la cantidad de filas que se revisan.
+    Set formulas = ws.Cells.SpecialCells(xlCellTypeFormulas)
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    Err.Clear
+    On Error GoTo Fallo
+    If numeroError <> 0 And numeroError <> 1004 Then Err.Raise numeroError, fuenteError, descripcionError
+    If numeroError = 1004 Or formulas Is Nothing Then
+        paso = "Comprobar ausencia de fórmulas de " & nombreHoja
+        estado = ws.Cells.HasFormula
+        If VarType(estado) = vbBoolean Then
+            If estado = False Then Exit Sub
+        End If
+        If numeroError <> 0 Then Err.Raise numeroError, fuenteError, descripcionError
+        Err.Raise 5, , "Excel no devolvió las fórmulas y no se pudo demostrar que la hoja estuviera libre de ellas."
+    End If
+    For Each area In formulas.Areas
+        columnas = area.Columns.Count: columnaBase = area.Column
+        filasBloque = tamanoBloque \ columnas
+        If filasBloque < 1 Then filasBloque = 1
+        For inicio = 1 To area.Rows.Count Step filasBloque
+            cantidad = filasBloque
+            If inicio + cantidad - 1 > area.Rows.Count Then cantidad = area.Rows.Count - inicio + 1
+            filaBase = area.Row + inicio - 1
+            Set bloque = area.Cells(inicio, 1).Resize(cantidad, columnas)
+            paso = "Leer bloque .Formula"
+            datos = bloque.Formula
+            If Not IsArray(datos) Then
+                If cantidad <> 1 Or columnas <> 1 Then Err.Raise 5, , "La lectura de fórmulas no devolvió el bloque completo."
+                unico(1, 1) = datos: datos = unico
+            End If
+            For i = 1 To cantidad
+                filaActual = filaBase + i - 1
+                For j = 1 To columnas
+                    columnaActual = columnaBase + j - 1
+                    'La excepción de fórmulas de MENÚ es solo K/L de la fila asociada, nunca otras filas o columnas.
+                    If Not (esMenu And filaActual = fila And (columnaActual = 11 Or columnaActual = 12)) Then
+                        If VarType(datos(i, j)) <> vbString Then
+                            paso = "Leer fórmula de " & nombreHoja & "!" & ws.Cells(filaActual, columnaActual).Address(False, False)
+                            Err.Raise 5, , "No se pudo leer el texto de una fórmula; no se continuará sin inspeccionarla."
+                        End If
+                        texto = CStr(datos(i, j))
+                        dosPuntos = InStr(1, texto, ":", vbBinaryCompare): referenciaMultiple = False
+                        If dosPuntos > 0 Then referenciaMultiple = InStr(dosPuntos + 1, texto, "!", vbBinaryCompare) > 0
+                        If InStr(1, texto, nombre, vbTextCompare) > 0 Or InStr(1, texto, "#REF!", vbTextCompare) > 0 Or _
+                            InStr(1, texto, "INDIRECT", vbTextCompare) > 0 Or InStr(1, texto, "EVALUATE(", vbTextCompare) > 0 Or _
+                            referenciaMultiple Then
+                            lugar = nombreHoja & "!" & ws.Cells(filaActual, columnaActual).Address(False, False)
+                            paso = "Revisar fórmula de " & lugar
+                            VerificarTextoDependencia texto, nombre, lugar
+                        End If
+                    End If
+                Next j
+            Next i
+        Next inicio
+    Next area
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: fuenteError = Err.Source
+    If paso = "Leer bloque .Formula" Then paso = paso & " de " & nombreHoja & " (fila " & filaBase & ", columna " & columnaBase & ")"
+    Err.Raise numeroError, fuenteError, "Fórmulas [" & paso & "]: " & descripcionError
+End Sub
+
+Public Function ExcluirZona(ByVal zona As Range, ByVal quitar As Range) As Range
+    Dim area As Range, comun As Range, parte As Range, resultado As Range
+    Dim arriba As Long, abajo As Long, izquierda As Long, derecha As Long
+    For Each area In zona.Areas
+        Set comun = Intersect(area, quitar)
+        If comun Is Nothing Then
+            Set parte = area
+            If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+        Else
+            'quitar es un rectángulo; cada resta produce a lo sumo cuatro rectángulos.
+            arriba = area.Row: abajo = area.Row + area.Rows.Count - 1
+            izquierda = area.Column: derecha = area.Column + area.Columns.Count - 1
+            If comun.Row > arriba Then
+                Set parte = area.Parent.Range(area.Parent.Cells(arriba, izquierda), area.Parent.Cells(comun.Row - 1, derecha))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+            If comun.Row + comun.Rows.Count - 1 < abajo Then
+                Set parte = area.Parent.Range(area.Parent.Cells(comun.Row + comun.Rows.Count, izquierda), area.Parent.Cells(abajo, derecha))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+            If comun.Column > izquierda Then
+                Set parte = area.Parent.Range(area.Parent.Cells(comun.Row, izquierda), area.Parent.Cells(comun.Row + comun.Rows.Count - 1, comun.Column - 1))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+            If comun.Column + comun.Columns.Count - 1 < derecha Then
+                Set parte = area.Parent.Range(area.Parent.Cells(comun.Row, comun.Column + comun.Columns.Count), area.Parent.Cells(comun.Row + comun.Rows.Count - 1, derecha))
+                If resultado Is Nothing Then Set resultado = parte Else Set resultado = Union(resultado, parte)
+            End If
+        End If
+    Next area
+    Set ExcluirZona = resultado
+End Function
+
