@@ -1,38 +1,39 @@
-﻿# Guía de mantenimiento — v7, corte 2 documentado
+# Guía de mantenimiento — v7 corte 2 con limpieza final de zona gris
 
 ## Ruta rápida
 
-**Es la misma implementación del corte 2, con comentarios selectivos de intención.** No es otro corte ni una corrección de negocio. El paquete autocontenido incluye los cuatro TXT compatibles completos, no ThisWorkbook ni fuentes históricas de otros módulos.
+**Limpieza final acotada:** al reducir entradas, retirar únicamente fórmulas automáticas del tramo final afectado y vacío, conservando H de la siguiente fila y las decisiones de mantenimiento. Se modifica Módulo 4 y se entrega Módulo 1 compatible. No es otra modularización.
 
-1. En una copia, finalizar mantenimiento con el código anterior y pausar Autoguardado. Seguir [LEEME-INSTALACION.txt](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-Documentado/LEEME-INSTALACION.txt). Si cambió la contraseña desde la base, detenerse y coordinar sin compartirla.
-2. Si ya está instalado el corte 2: reemplazar todo el contenido de los cuatro módulos existentes según CAMBIOS, sin crear ni renombrar módulos. Todos cambian solo por comentarios. No ejecutar, guardar ni cerrar a mitad.
-3. Si se instala el paquete completo por primera vez: conservar el Módulo 4 existente y añadir únicamente los tres módulos internos que falten, con nombres exactos; no sobrescribir un módulo cuyo origen no se verificó.
-4. Compilar en VBE al terminar y probar en copia. No se compiló/ejecutó VBA ni Excel en esta edición; el control de identidad de código no certifica el libro real.
-5. Usar Ctrl+F por nombre; el catálogo final está recalculado para estos TXT. No cambiar asignaciones de figuras ni reinstalar ThisWorkbook/Módulos 1/2/3 instalados, incluidas sus correcciones.
+1. Trabajar en una copia íntegra. Con el código anterior completo, finalizar mantenimiento/autorización y pausar Autoguardado. Conservar la pareja de fuentes anterior. Si cambió CLAVE_HOJA, coordinar la adaptación sin publicar la clave ni reponer una antigua.
+2. Con el corte 2 modular instalado, reemplazar TODO el contenido del Módulo 4 existente por Modulo-4-v7-corte2.txt y TODO el Módulo 1 de BorrarDatos por Modulo-1-limpieza-zona-gris.txt. Si su Módulo 1 contiene otras rutinas/cambios, no sobrescribirlo: comparar e integrar la única Sub BorrarDatos. Mantener los nombres reales, incluido acento. Instalar ambos antes de ejecutar.
+3. Los tres módulos internos adjuntos son byte idénticos a la entrega anterior; no es necesario sustituirlos si ya coinciden. Si aún no están instalados, seguir LEEME para instalar el conjunto completo. No duplicar Módulo 4 ni BorrarDatos.
+4. Durante la sustitución parcial NO ejecutar macros, guardar, cerrar ni cambiar de hoja. Compilar el proyecto cuando todo esté completo y probar en copia los casos de esta guía. No se ha compilado ni ejecutado VBA/Excel durante la verificación de estos TXT.
+5. No sustituir ThisWorkbook ni Módulos 2/3, no cambiar figuras ni la contraseña por este ajuste.
 
-## Qué cambia y qué no
+### Criterio autorizado y límites de la limpieza
 
-| Archivo de código completo | Estado frente al corte 2 |
-|---|---|
-| Modulo-4-v7-corte2.txt | Solo comentarios: propiedad del estado, importación, mantenimiento, guardado, fórmulas y eliminación. |
-| NeteoValidaciones.txt | Solo comentarios: revisión que cuenta/marca y también ajusta datos según reglas existentes. |
-| NeteoDependencias.txt | Solo comentarios: cobertura del recorrido y excepción exacta de fórmulas de MENÚ. |
-| NeteoRespaldos.txt | Solo comentarios: snapshot temporal frente a archivo persistente y responsabilidades del controlador. |
-
-No hay archivos de código completos byte idénticos en esta edición: los cuatro reciben comentarios útiles, pero **sus líneas de código son idénticas**. Guía, LEEME y CAMBIOS se actualizan documentalmente. La implementación conserva **82 + 9 + 5 + 6 = 102 rutinas**, firmas/visibilidad/orden, clave, estados y reglas.
-
-Reversión desde corte 2: reponer los cuatro contenidos originales compatibles del corte 2 en los mismos módulos. **No quitar módulos**: no se cambió la arquitectura. Esto revierte comentarios, no recupera hojas/datos borrados.
+- En el tramo final afectado y realmente vacío de A:G/U:V, las fórmulas históricas idénticas al modelo y sin marca se consideran automáticas. Es el criterio aprobado: no existe información histórica para distinguir una coincidencia previamente aceptada de una fórmula generada automáticamente.
+- Desde esta entrega, conservar un cambio en mantenimiento registra toda la zona aceptada, incluidas fórmulas y constantes; RegistrarVaciosConservados mantiene su nombre histórico, reutiliza las excepciones y descuenta rangos ya registrados. No crea nombres por cada fórmula automática.
+- Fórmulas diferentes, constantes, excepciones/vacíos conservados y las nuevas decisiones autorizadas, aunque coincidan con el modelo, se preservan. No se comparan resultados de cálculo para decidir qué borrar.
+- Comparación conservadora y exacta con FormulaR1C1 del modelo I:T y la fórmula especial H: diferencias de escritura se conservan, no se normalizan literales de texto ni se reconstruyen vínculos.
+- Una fila intermedia vacía o una fila con cualquier entrada (incluido F/U/V, cero, error o una fórmula que devuelva vacío) no se limpia. Se mantiene H de la siguiente fila; si no quedan entradas, H12, respetando sus excepciones.
+- Módulo 4 valida primero las filas editadas y prepara H:T solo hasta la última entrada real; no rellena las filas finales para borrarlas después. El nuevo auxiliar limita su trabajo al intervalo afectado y al contenido existente, por bloques y rangos contiguos; no recorre celda por celda toda la hoja ni todas las hojas por cada edición. La validación existente conserva su alcance sobre Target: un borrado de columnas completas puede seguir siendo costoso.
+- BorrarDatos conserva sus ClearContents completos de A:G/U:V; captura el límite de entradas antes de borrar y llama al mismo auxiliar con eventos desactivados. No usa ese límite para recortar el borrado de entradas.
+- No es una limpieza inicial del sobrante histórico no afectado. Al borrar hasta 1050, las fórmulas antiguas fuera de ese intervalo se conservan. Con BorrarDatos se limpia solo hasta el último registro anterior; no promete quitar todas las fórmulas históricas posteriores.
+- No borra formatos, validaciones, comentarios ni filas físicas. No toca MENÚ/DATOS/ALCON/PLANTILLA. Se omiten tablas, matrices, derrames o combinaciones y se conserva el tramo si una excepción no puede resolverse con seguridad.
+- Durante mantenimiento se actualiza el respaldo después de cada rango limpiado para que una recuperación no lo reviva. Ante fallo se intenta cerrar mantenimiento y restaurar protección/eventos/pantalla; no se promete deshacer un borrado manual o de BorrarDatos.
+- No hay una nueva medición de tamaño ni tiempo. El formato, los vínculos y el rango usado pueden seguir influyendo en el archivo después de limpiar fórmulas.
 
 ## 1. Mapa de responsabilidades del corte 2
 
 | Componente | Rutinas | Responsabilidad |
 |---|---:|---|
-| [Módulo 4 existente](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-Documentado/Modulo-4-v7-corte2.txt) | 82 | Entradas públicas, configuración central, tres objetos privados, autorizaciones, importación, MENÚ, plantillas y coordinación. |
-| [NeteoValidaciones](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-Documentado/NeteoValidaciones.txt) | 9 | Validación por bloques, fecha/valor, colores y listas/reglas. Misma implementación del corte 2; solo comentarios nuevos en esta edición. |
-| [NeteoDependencias](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-Documentado/NeteoDependencias.txt) | 5 | Inspección de referencias y resta rectangular. Misma implementación del corte 2; solo comentarios nuevos en esta edición. |
-| [NeteoRespaldos](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-Documentado/NeteoRespaldos.txt) | 6 | Crear respaldo temporal, capturar/restaurar contenido, comprobar compatibilidad del rango y copiar el archivo antes de eliminar. Sin estado de autorización. |
+| [Módulo 4 existente](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/Modulo-4-v7-corte2.txt) | 83 | Entradas públicas, configuración central, tres objetos privados, autorizaciones, importación, MENÚ, plantillas y coordinación. |
+| [NeteoValidaciones](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/NeteoValidaciones.txt) | 9 | Validación por bloques, fecha/valor, colores y listas/reglas. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
+| [NeteoDependencias](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/NeteoDependencias.txt) | 5 | Inspección de referencias y resta rectangular. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
+| [NeteoRespaldos](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/NeteoRespaldos.txt) | 6 | Crear respaldo temporal, capturar/restaurar contenido, comprobar compatibilidad del rango y copiar el archivo antes de eliminar. Sin estado de autorización. |
 
-**102 rutinas únicas con la misma arquitectura del corte 2.** Esta edición añade solamente comentarios completos de intención. Las líneas físicas de código, incluidas firmas, declaraciones, espacios, finales CRLF, literales y comentarios en línea, quedan idénticas al retirar únicamente comentarios completos y líneas vacías. Las 65 firmas públicas originales no cambian; no se afirma que los archivos completos tengan el mismo hash.
+**103 rutinas en los cuatro componentes de Módulo 4 (83/9/5/6), más BorrarDatos en Módulo 1.** Conserva las 65 firmas públicas originales y añade un auxiliar público con argumentos para comunicar Módulo 1 con Módulo 4. Cambian solo ActualizarEntradaEnHoja y RegistrarVaciosConservados entre las 82 rutinas anteriores; las otras 80, incluida AgregarFilaMenu, permanecen byte idénticas. No cambia el estado de módulo. Los tres componentes internos son byte idénticos.
 
 ### Fronteras internas y propiedad del estado
 
@@ -55,7 +56,7 @@ Reversión desde corte 2: reponer los cuatro contenidos originales compatibles d
 
 `TextosLiterales` conserva el tratamiento original de textos que comienzan con `=`, otros textos, escalares/matrices, booleanos y valores de error. El corte no cambia el algoritmo de Value2/FormulaR1C1 ni corrige diferencias de representación COM. El snapshot temporal y el respaldo persistente de archivo siguen siendo conceptos distintos.
 
-La medición del usuario **48,727 s → 2,391 s** pertenece a la optimización anterior de la revisión previa a confirmar, en un caso. Este corte no agrega una optimización ni garantiza esos tiempos o corrección end-to-end.
+La medición del usuario **48,727 s → 2,391 s** pertenece a la optimización anterior de la revisión previa a confirmar, en un caso. La limpieza actual tampoco garantiza esos tiempos ni una mejora de tamaño o corrección end-to-end sin probar el libro.
 
 ### Botones/macros: asignaciones esperadas
 
@@ -67,13 +68,13 @@ Este mapa muestra los procedimientos previstos, **no certifica las asignaciones 
 | Importar valores | `ImportarDatosDesdeArchivoExcel` | Rango origen y destino operativo editable; sin reorganizar columnas. |
 | Desbloquear/autorizar | `DesbloquearHoja` | MENÚ: cuentas A/B o mantenimiento A:L; operativa: mantenimiento A:V. |
 | Volver a proteger | `VolverAProtegerHoja` | Cierra autorización/mantenimiento y restaura bloqueos funcionales. |
-| Agregar fila MENÚ | `AgregarFilaMenu` | Prepara la siguiente fila según última información A/B; copia modelo C10:L10. No crea hoja. |
+| Agregar fila MENÚ | `AgregarFilaMenu` | Según última información A/B, prepara un destino vacío, conserva uno completamente formulado o detiene contenido incompleto/inesperado. No crea hoja. |
 | Eliminar última fila MENÚ | `EliminarUltimaFilaMenu` | Limpia A:L, sin desplazamientos; nunca fila 10; bloquea una hoja asociada. |
 | Crear plantilla | `CrearNuevaHojaDesdePlantilla` | Copia PLANTILLA, crea PLANTILLA nn y enlaza MENÚ. |
 | Eliminar última plantilla | `EliminarUltimaPlantilla` | Solo última numerada permitida, con clave, confirmación y respaldo completo. Conserva su fila de MENÚ. |
 | Configurar validaciones, uso técnico | `ConfigurarValidacionesEntradaHojaActiva` | Repone reglas de la operativa; no sustituye las pruebas de negocio. |
 | Restablecer protección, automático/técnico | `RestablecerProteccionAlAbrir` | MENÚ/operativas y estructura; no migra por sí solo la protección del modelo. |
-| Borrar datos, Módulo 1 | `BorrarDatos` | Limpieza de entradas según la fuente disponible; no se cambió aquí. |
+| Borrar datos, Módulo 1 | `BorrarDatos` | Borra entradas completas y llama la limpieza final compartida con límite anterior; conserva la preparación mínima y los estados previos. |
 | Reclasificación, Módulo 2 | `copiar_reclasificacion` | Libro de salida Hoja1/Hoja2 según su código actual; no se cambió aquí. |
 | ALCON, Módulo 3 | `ALCON` | Operativa → hoja ALCON → libro de salida; restaura visibilidad y estructura según su versión actual. |
 
@@ -119,7 +120,26 @@ El validador global recorre hojas no clasificadas como técnicas por `EsHojaTecn
 
 ### MENÚ: cuentas y filas
 
-Para editar cuentas se requiere la autorización de `DesbloquearHoja`; la hoja vuelve a estar protegida con las celdas permitidas desbloqueadas. `AgregarFilaMenu` reutiliza autorización vigente o solicita clave; se basa en la última información A/B, no en la última fórmula preparada C:L. Por eso repetir el botón sin llenar cuentas puede volver a la misma fila. No inserta/desplaza filas ni crea operativas. `EliminarUltimaFilaMenu` pide clave siempre, considera contenido/fórmulas A:L, protege fila 10 y rechaza una asociación existente; conserva el borde inferior de la fila superior.
+Para editar cuentas se requiere autorización; la hoja sigue protegida con las celdas permitidas desbloqueadas. `AgregarFilaMenu` reutiliza autorización de cuentas o mantenimiento vigente; si no existe, solicita y comprueba la clave antes de inspeccionar cuentas o fórmulas, sin habilitar todavía A/B. Se basa en la última información A/B, no en la última fórmula preparada C:L. Por eso repetir el botón sin llenar cuentas vuelve a la misma fila, ahora sin reemplazar sus fórmulas completas. No inserta/desplaza filas ni crea operativas. `EliminarUltimaFilaMenu` no cambia: pide clave siempre, considera contenido/fórmulas A:L, protege fila 10 y rechaza una asociación existente; conserva el borde inferior de la fila superior.
+
+### Ajuste de AgregarFilaMenu
+
+La comprobación se limita a las diez celdas C:L del destino, **sin interpretar sus resultados** ni comparar su semántica contable con el modelo:
+
+| Estado de C:L en el destino | Acción |
+|---|---|
+| Todas vacías, sin contenido ni fórmulas | Conserva el procedimiento anterior de copia de fórmulas, formato y validaciones desde C10:L10; K/L se dejan visualmente vacías para una fila nueva. |
+| Las diez celdas tienen fórmulas, sin texto #REF! en ellas | Conserva fórmulas, formatos y validaciones existentes; no pega ni pregunta por reemplazo. Autoriza A/B conforme al permiso vigente, selecciona A de esa fila y avisa dónde ingresar ambas cuentas. |
+| Mezcla de fórmulas y vacíos, constantes, errores constantes u otra preparación incompleta | Avisa y sale sin sobrescribir ni habilitar una nueva autorización. El permiso de cuentas o mantenimiento que ya estuviera vigente se mantiene. |
+| Una fórmula contiene #REF! | Avisa y sale para revisión, aunque IFERROR oculte el error. No repara referencias ni vínculos. La búsqueda es textual y también detiene una fórmula que incluya ese texto como literal. |
+
+Una fórmula que devuelve vacío, cero, #N/A u otro error de cálculo no se rechaza solo por ese resultado. Esto no demuestra que la fórmula sea contablemente correcta ni que sus vínculos estén disponibles. Un valor fijo, aunque parezca un resultado correcto, no cuenta como fórmula preparada. Formatos o validaciones sin contenido no cuentan como preparación: se sigue la rama vacía y se aplica el modelo como antes.
+
+Se conservan las comprobaciones previas de K10/L10 y su referencia a PLANTILLA 01. La fila 10 es el modelo mínimo: si C10:L10 está completo se conserva, incluidos K10/L10; no se envuelven otra vez sus fórmulas. Si falta el propio modelo, el botón no puede reconstruirlo copiándose a sí mismo: se detiene para revisión. Las fórmulas modelo existentes deben gestionar la presentación vacía si todavía no está creada PLANTILLA 01.
+
+En mantenimiento se mantiene A:L autorizado y M en adelante bloqueado. Si la fila ya estaba completa, no se vuelve a capturar su contenido en el respaldo temporal porque no se reemplazó; si se preparó una fila vacía, se conserva la captura anterior. Los bloqueos funcionales siguen ajustándose al modo vigente, sin reemplazar fórmulas, validaciones o formato visual de una fila completa.
+
+Ejemplo: con cuentas hasta A29/B29 y fórmulas completas en C30:L30, el botón selecciona A30 y avisa «La fila 30 ya está preparada. Ingrese las cuentas en A30 y B30. No se reemplazaron sus fórmulas». Después de ingresar cuentas en A30/B30, la siguiente ejecución apunta a la fila 31. Clave incorrecta o cancelada no reemplaza contenido ni habilita permisos. Esta lógica no agrega un cuadro de confirmación nuevo.
 
 Al salir manualmente de MENÚ, sus eventos pueden preguntar si se bloquea o mantiene el permiso; se repite mientras continúe autorizado. Las navegaciones internas con eventos desactivados no generan ese mismo aviso. Guardar/cerrar o volver a proteger finaliza autorización según el flujo actual.
 
@@ -141,7 +161,7 @@ Al salir manualmente de MENÚ, sus eventos pueden preguntar si se bloquea o mant
 | `respaldoMantenimiento` | Libro temporal con contenido previo de la zona autorizada | No cerrarlo/descartarlo a mitad ni confundirlo con una copia de archivo recuperable tras cerrar Excel. |
 | `hojaCuentasMenu` | Referencia de autorización de cuentas de MENÚ | Privada; finalizarla por las rutinas existentes. |
 | `CLAVE_HOJA` | Constante central que comparten autorizaciones, hojas gestionadas y estructura | Conservar una definición; no publicar su valor en guías, mensajes o trazas. |
-| `PREFIJO_CONSERVAR` | Prefijo de nombres definidos que representan excepciones de vacíos conservados | No limpiar nombres definidos indiscriminadamente; pueden expresar cambios autorizados. |
+| `PREFIJO_CONSERVAR` | Prefijo de nombres definidos que representan zonas conservadas; antes solo vacíos, ahora todo contenido aceptado | No limpiar nombres definidos indiscriminadamente; pueden expresar cambios autorizados. |
 
 `CrearRespaldo`, `CapturarContenido` y `RestaurarContenido` utilizan libros temporales para contenido/formato/validación según el flujo. Importar respalda el rango reemplazado; mantenimiento conserva el contenido inmediatamente anterior autorizado. No son lo mismo que `GuardarRespaldoPlantilla`, que crea un **archivo completo persistente** antes de eliminar una hoja. Un snapshot temporal no garantiza recuperación después de cerrar Excel, un fallo de proceso, End o Reset.
 
@@ -175,14 +195,14 @@ No basta con que compile o aparezca un mensaje correcto. Comparar con una copia 
 
 | Flujo | Caso mínimo y resultado a comprobar |
 |---|---|
-| Instalación | Cuatro archivos completos; nombres internos exactos; 65 macros/APIs originales en Módulo 4; proyecto compilado sin duplicados ni referencias inaccesibles. Probar figuras reales: su asignación no fue inventariada. |
+| Instalación | Cinco fuentes completas (Módulos 1/4 y tres internos); nombres internos exactos; 65 macros/APIs originales en Módulo 4 más el auxiliar compartido; proyecto compilado sin duplicados ni referencias inaccesibles. Probar figuras reales: su asignación no fue inventariada. |
 | Entrada/validación | Fecha, NIT, valor distinto de cero, V obligatoria, Cliente/Red y catálogo; valores válidos/erróneos/pegado múltiple. Mismos mensajes y marcas rojas; H especial e I:T recuperadas sin sobrescribir excepciones. |
 | Importar | Valores sin reorganizar desde origen válido; límite de zona A:G/U:V; intento de propio libro; confirmación de reemplazo con No; cancelación/fallo y recuperación del rango. No perder datos ni permitir guardado inválido. |
-| MENÚ/protección | Bloqueo predeterminado total; clave incorrecta/cancelar sin cambios; cuentas solo A/B y mantenimiento A:L. Agregar/eliminar fila mantienen reglas, fila 10 y asociación. Conservar/restaurar contenido; aviso al salir. |
+| MENÚ/protección | Bloqueo predeterminado total; clave incorrecta/cancelar sin cambios; cuentas solo A/B y mantenimiento A:L. Agregar: vacío copia modelo; completo conserva C:L y selecciona A; incompleto/constante/#REF! detiene sin nuevo permiso. Eliminar fila, fila 10, asociación, conservar/restaurar contenido y aviso al salir mantienen sus reglas. |
 | Crear plantilla | Modelo PLANTILLA y fila MENÚ válidos; dependencia/gap/modelo inválido bloquea; clave y confirmación según permiso actual; error/cancelación restaura visibilidad, estructura y eventos. |
 | Eliminar plantilla | Primera comprobación responder No: nada se borra. Luego, solo en copia desechable con respaldo confirmado: última adicional, nunca 01, dependencias bloquean; A/B y C:J conservadas, K/L provisionales y estado correcto. No prometer recuperación automática tras borrado efectivo. |
 | Guardar/reabrir | Guardar desde MENÚ detecta errores operativos y bloquea; corregir y guardar. Reabrir: autorizaciones finalizadas, bloqueos/estructura y fórmulas conservadas; eventos/pantalla normales. |
-| Salidas contables | Comparar Reclasificación y ALCON con las salidas esperadas, incluida Hoja1 sin datos. No se modificaron Módulos 1/2/3; comprobar compatibilidad real. |
+| Salidas contables | Comparar Reclasificación y ALCON con las salidas esperadas, incluida Hoja1 sin datos. No se modificaron Módulos 2/3; comprobar compatibilidad real con la nueva pareja 1/4. |
 
 ### Pendientes y límites
 
@@ -200,13 +220,28 @@ No basta con que compile o aparezca un mensaje correcto. Comparar con una copia 
 - Mantenimiento: conservar y luego recuperar una edición posterior respetando cambios autorizados previos, cerrar autorización y comprobar protección/eventos/pantalla.
 - Borrar plantilla: primera revisión con No; después, solo en copia desechable, comprobar archivo de respaldo visible y válido antes de eliminación, controles de referencias y K/L de MENÚ.
 
-En el corte 2 se comprobaron fuentes y modelos Python de límites, bloques y literales; esta edición solo comprueba identidad de código y documentación: **no ejecución del motor VBA ni de Excel**. Compilar y probar eventos, figuras, recuperación y archivo real sigue pendiente. No pasar al siguiente corte hasta aprobar la regresión del usuario.
+En el corte 2 se comprobaron fuentes y modelos Python de límites, bloques y literales. El ajuste anterior de MENÚ añadió contratos de clasificación/autorización; esta entrega agrega limpieza acotada y conservación, con preservación de rutinas ajenas, identidad de internos y lectura del ZIP: **no ejecución del motor VBA ni de Excel**. Compilar y probar en copia los estados vacío/completo/incompleto, resultados vacíos o con error, clave cancelada/incorrecta, fila 10, mantenimiento, protección y figuras reales. No presentar estas comprobaciones como regresión funcional completa del libro.
 
-## 7. Catálogo completo de esta edición
+## Pruebas específicas de esta entrega
 
-Líneas verificadas sobre estos cuatro TXT; pueden variar al editar. Buscar por nombre es más estable. No se inspeccionaron asignaciones reales de figuras/OnAction.
+1. En copia, datos hasta 1005: borrar completamente A:G/U:V de 1005; conservar fila1004, H1005 y las excepciones, quitar solo fórmulas automáticas I:T elegibles de1005.
+2. Datos hasta1050: borrar1005:1050; comprobar la limpieza automática del tramo, H1005 mínima, fórmulas distintas/constantes/excepciones intactas y contenido posterior no afectado intacto.
+3. Dejar F, U o V con datos en1050 o borrar un campo: esa fila debe conservar H:T y validarse normalmente. Un hueco intermedio no es sobrante final.
+4. Volver a escribir entradas en una fila limpiada: recuperar sus H:T elegibles según modelo, sin sobreescribir decisiones conservadas.
+5. Conservar durante mantenimiento una fórmula diferente, una igual al modelo y un vacío. Borrar sus entradas; guardar/reabrir y comprobar preservación. Probar restauración inmediatamente anterior y que las fórmulas limpiadas no reaparezcan desde el respaldo.
+6. Ejecutar BorrarDatos: borrar todas sus entradas habituales, limpiar solo el tramo anterior utilizado, mantener H12/excepciones y no tocar hojas técnicas. Comprobar estados, protección, cancelaciones y errores en copia.
+7. Verificar una fila ya preparada de MENÚ: AgregarFilaMenu no vuelve a pedir reemplazar sus fórmulas. Probar las macros de cuentas/plantillas ya existentes como regresión.
+8. Probar un pegado o borrado de varias áreas y uno grande con el volumen habitual; medir antes/después si se busca cuantificar rendimiento. No afirmar resultados económicos ni rendimiento por las pruebas de fuente.
 
-### Modulo-4-v7-corte2.txt — 82 rutinas
+Las pruebas automáticas entregadas internamente son contratos de fuentes y modelos de política, no un intérprete VBA, compilación ni ejecución de eventos/figuras reales. Los fallos históricos de pruebas que exigían identidad total con otra edición documental no se presentan como regresiones nuevas ni como pruebas verdes.
+
+## Reversión de esta entrega
+
+Reponer juntos los contenidos anteriores de Módulo 4 y Módulo 1, conservar los tres módulos internos y compilar. No quitar módulos ni aplicar una reversión antigua de modularización. Restaurar código no recupera fórmulas/datos ya borrados; conservar la copia íntegra previa.
+
+## Catálogo de líneas de la entrega actual
+
+### Modulo-4-v7-corte2.txt
 
 | Procedimiento | Línea |
 |---|---:|
@@ -251,49 +286,56 @@ Líneas verificadas sobre estos cuatro TXT; pueden variar al editar. Buscar por 
 | `QuitarListaRedesEnCelda` | 613 |
 | `ActualizarListaRedSegunTipoCliente` | 617 |
 | `ImportarDatosDesdeArchivoExcel` | 629 |
-| `FilaTieneDatosEntrada` | 796 |
-| `ObtenerUltimaFilaEntrada` | 806 |
-| `ObtenerUltimaFilaParaRevision` | 818 |
-| `ActualizarEntradaEnHoja` | 826 |
-| `PrepararFilasEntrada` | 843 |
-| `CompletarFormulasZonaGris` | 874 |
-| `CompletarColumnaCalculada` | 883 |
-| `ActualizarRespaldoDespuesDeEntrada` | 933 |
-| `ProtegerTodasLasHojasTrabajo` | 957 |
-| `ProtegerHojaTrabajo` | 970 |
-| `ConfigurarBloqueoHoja` | 975 |
-| `RestaurarEstadoHoja` | 997 |
-| `DesbloquearHoja` | 1021 |
-| `EstaEnMantenimiento` | 1104 |
-| `RestaurarBloqueoFuncional` | 1109 |
-| `FinalizarMantenimiento` | 1133 |
-| `VolverAProtegerHoja` | 1157 |
-| `RestablecerProteccionAlAbrir` | 1176 |
-| `ProtegerEstructuraLibro` | 1191 |
-| `ZonaCalculada` | 1200 |
-| `GestionarCambioMantenimiento` | 1212 |
-| `AgregarExcepcion` | 1249 |
-| `RegistrarVaciosConservados` | 1266 |
-| `VerificarZonaMantenimiento` | 1299 |
-| `RecuperarMantenimientoInterrumpido` | 1318 |
-| `MenuAutorizado` | 1350 |
-| `AutorizarCuentasMenu` | 1358 |
-| `AvisarSalidaMenu` | 1389 |
-| `AgregarFilaMenu` | 1415 |
-| `EliminarUltimaFilaMenu` | 1512 |
-| `FilaMenuCompleta` | 1663 |
-| `VerificarModeloMenu` | 1689 |
-| `VerificarCuentasFilaMenu` | 1698 |
-| `VincularFilaMenu` | 1707 |
-| `AplicarFormulasEncabezadosDesdeMenu` | 1725 |
-| `HojaAsociadaFilaMenu` | 1741 |
-| `BordeInferiorFilaMenu` | 1768 |
-| `CrearNuevaHojaDesdePlantilla` | 1813 |
-| `EliminarUltimaPlantilla` | 1929 |
-| `ContarHojasTrabajoCreadas` | 2028 |
-| `VerificarSecuenciaPlantillas` | 2032 |
+| `FilaTieneDatosEntrada` | 797 |
+| `ObtenerUltimaFilaEntrada` | 807 |
+| `ObtenerUltimaFilaParaRevision` | 819 |
+| `ActualizarEntradaEnHoja` | 827 |
+| `PrepararFilasEntrada` | 855 |
+| `CompletarFormulasZonaGris` | 886 |
+| `CompletarColumnaCalculada` | 895 |
+| `LimpiarFormulasFinalesVacias` | 948 |
+| `ActualizarRespaldoDespuesDeEntrada` | 1092 |
+| `ProtegerTodasLasHojasTrabajo` | 1116 |
+| `ProtegerHojaTrabajo` | 1129 |
+| `ConfigurarBloqueoHoja` | 1134 |
+| `RestaurarEstadoHoja` | 1156 |
+| `DesbloquearHoja` | 1180 |
+| `EstaEnMantenimiento` | 1263 |
+| `RestaurarBloqueoFuncional` | 1268 |
+| `FinalizarMantenimiento` | 1292 |
+| `VolverAProtegerHoja` | 1316 |
+| `RestablecerProteccionAlAbrir` | 1335 |
+| `ProtegerEstructuraLibro` | 1350 |
+| `ZonaCalculada` | 1359 |
+| `GestionarCambioMantenimiento` | 1371 |
+| `AgregarExcepcion` | 1408 |
+| `RegistrarVaciosConservados` | 1425 |
+| `VerificarZonaMantenimiento` | 1451 |
+| `RecuperarMantenimientoInterrumpido` | 1470 |
+| `MenuAutorizado` | 1502 |
+| `AutorizarCuentasMenu` | 1510 |
+| `AvisarSalidaMenu` | 1541 |
+| `AgregarFilaMenu` | 1567 |
+| `EliminarUltimaFilaMenu` | 1679 |
+| `FilaMenuCompleta` | 1830 |
+| `VerificarModeloMenu` | 1856 |
+| `VerificarCuentasFilaMenu` | 1865 |
+| `VincularFilaMenu` | 1874 |
+| `AplicarFormulasEncabezadosDesdeMenu` | 1892 |
+| `HojaAsociadaFilaMenu` | 1908 |
+| `BordeInferiorFilaMenu` | 1935 |
+| `CrearNuevaHojaDesdePlantilla` | 1980 |
+| `EliminarUltimaPlantilla` | 2096 |
+| `ContarHojasTrabajoCreadas` | 2195 |
+| `VerificarSecuenciaPlantillas` | 2199 |
 
-### NeteoValidaciones.txt — 9 rutinas
+### Modulo-1-limpieza-zona-gris.txt
+
+| Procedimiento | Línea |
+|---|---:|
+| `BorrarDatos` | 3 |
+
+### NeteoValidaciones.txt
 
 | Procedimiento | Línea |
 |---|---:|
@@ -307,7 +349,7 @@ Líneas verificadas sobre estos cuatro TXT; pueden variar al editar. Buscar por 
 | `ConfigurarReglaEnRango` | 194 |
 | `PrepararListasRed` | 244 |
 
-### NeteoDependencias.txt — 5 rutinas
+### NeteoDependencias.txt
 
 | Procedimiento | Línea |
 |---|---:|
@@ -317,7 +359,7 @@ Líneas verificadas sobre estos cuatro TXT; pueden variar al editar. Buscar por 
 | `VerificarFormulasDependientes` | 199 |
 | `ExcluirZona` | 271 |
 
-### NeteoRespaldos.txt — 6 rutinas
+### NeteoRespaldos.txt
 
 | Procedimiento | Línea |
 |---|---:|
