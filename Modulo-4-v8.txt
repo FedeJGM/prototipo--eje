@@ -1,14 +1,4 @@
 Option Explicit
-'Módulo 4 v7 modular, corte 2: coordinación, APIs públicas y estado privado original.
-'Paquete completo: este archivo + NeteoValidaciones + NeteoDependencias + NeteoRespaldos.
-'Reemplazar TODO el Módulo 4 existente, sin renombrarlo ni duplicarlo.
-'Instalación: LEEME-INSTALACION.txt. Guía: GUIA-MANTENIMIENTO-corte2-v7.md.
-'Mantener ThisWorkbook y Módulos 1/2/3 instalados; no reinstalarlos por este corte.
-'82 rutinas aquí, 102 entre cuatro módulos; 65 firmas públicas originales preservadas.
-'Los respaldos reciben contexto por argumentos; no son dueños de la autorización.
-'H mantiene cálculo especial; I:T, modelos. Clave y estados privados no se trasladan.
-'Compilar y probar en COPIA; no ejecutar/guardar con el paquete instalado parcialmente.
-'No usar End/Reset durante operaciones.
 
 Public Const CLAVE_HOJA As String = "EJEMPLO"
 Private Const PRIMERA_FILA As Long = 12
@@ -791,6 +781,7 @@ End Sub
 
 '============================================================================
 ' [G5] Entradas, última fila y fórmulas calculadas (8 rutinas aquí)
+'Actualización: este grupo incluye ahora 9 rutinas con el auxiliar de limpieza final.
 '============================================================================
 
 Function FilaTieneDatosEntrada(ByVal ws As Worksheet, ByVal fila As Long) As Boolean
@@ -826,16 +817,27 @@ End Function
 Sub ActualizarEntradaEnHoja(ByVal ws As Worksheet, ByVal Target As Range)
     'API para el futuro SheetChange: solo las filas afectadas, incluidos pegados y borrados.
     Dim zona As Range, area As Range, primera As Long, ultima As Long, errores As Long, siguiente As Long
+    Dim ultimaEntrada As Long, ultimaPreparar As Long
     If EsHojaTecnica(ws.Name) Then Exit Sub
     Set zona = Intersect(Target, Union(ws.Range("A12:G" & ws.Rows.Count), ws.Range("U12:V" & ws.Rows.Count)))
     If zona Is Nothing Then Exit Sub
     For Each area In zona.Areas
         primera = area.Row: ultima = area.Row + area.Rows.Count - 1
         errores = ValidarHojaTrabajo(ws, primera, ultima)
-        PrepararFilasEntrada ws, primera, ultima
-        CompletarFormulasZonaGris ws, primera, ultima
     Next area
-    siguiente = ObtenerUltimaFilaEntrada(ws) + 1
+    'Validar primero permite usar el límite real después de los ajustes de Red/NIT/oficina.
+    ultimaEntrada = ObtenerUltimaFilaEntrada(ws)
+    For Each area In zona.Areas
+        primera = area.Row: ultima = area.Row + area.Rows.Count - 1
+        ultimaPreparar = Application.Min(ultima, ultimaEntrada)
+        If ultimaPreparar >= primera Then
+            PrepararFilasEntrada ws, primera, ultimaPreparar
+            CompletarFormulasZonaGris ws, primera, ultimaPreparar
+        End If
+        'No rellenar para borrar después: solo limpiar el tramo final afectado y ya vacío.
+        If ultima > ultimaEntrada Then LimpiarFormulasFinalesVacias ws, primera, ultima, ultimaEntrada
+    Next area
+    siguiente = ultimaEntrada + 1
     If siguiente < PRIMERA_FILA Then siguiente = PRIMERA_FILA
     If siguiente <= ws.Rows.Count Then PrepararFilasEntrada ws, siguiente, siguiente
 End Sub
@@ -928,6 +930,153 @@ Private Sub CompletarColumnaCalculada(ByVal ws As Worksheet, ByVal columna As Lo
             Next area
         End If
     Next inicio
+End Sub
+
+'Auxiliar compartido con BorrarDatos: no asignar a figuras; el rango recibido limita la limpieza.
+'Solo quita fórmulas idénticas al modelo sin excepción conservada; no borra formatos ni constantes.
+'Las coincidencias históricas sin marca se consideran automáticas según el criterio autorizado.
+Public Sub LimpiarFormulasFinalesVacias(ByVal ws As Worksheet, ByVal primera As Long, ByVal ultima As Long, ByVal ultimaEntrada As Long)
+    Dim elegible As Range, zona As Range, encontradas As Range, area As Range, borrarRango As Range
+    Dim encontrada As Range, exceptuada As Range, parte As Range, modelo As Worksheet, tabla As ListObject
+    Dim nombre As Name, estado As Variant, datos As Variant, extra As Variant, formulas As Variant
+    Dim vacias() As Boolean, patron As String, formulaActual As String
+    Dim inicio As Long, cantidad As Long, columna As Long, i As Long, j As Long, fila As Long, desde As Long, siguiente As Long
+    Dim quitar As Boolean, protegida As Boolean, eventosAnteriores As Boolean, pantallaAnterior As Boolean
+    Dim errorNumero As Long, errorDescripcion As String
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    If Not (ws.Parent Is ThisWorkbook) Then Exit Sub
+    primera = Application.Max(PRIMERA_FILA, primera, ultimaEntrada + 1)
+    If ultima > ws.Rows.Count Or primera > ultima Then Exit Sub
+    siguiente = Application.Max(PRIMERA_FILA, ultimaEntrada + 1)
+    Set elegible = ws.Range("H" & primera & ":T" & ultima)
+    Set encontrada = elegible.Find(What:="*", After:=elegible.Cells(1, 1), LookIn:=xlFormulas, _
+        LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+    If encontrada Is Nothing Then Exit Sub
+    ultima = Application.Min(ultima, encontrada.Row)
+    Set elegible = ws.Range("H" & primera & ":T" & ultima)
+    'Descontar las decisiones conservadas antes de comparar, incluso si coinciden con el modelo.
+    For Each nombre In ThisWorkbook.Names
+        If InStr(1, nombre.Name, PREFIJO_CONSERVAR, vbTextCompare) > 0 Then
+            Set exceptuada = Nothing
+            On Error Resume Next
+            Set exceptuada = nombre.RefersToRange
+            Err.Clear
+            On Error GoTo 0
+            'Una marca ilegible no permite decidir con seguridad: conservar este tramo.
+            If exceptuada Is Nothing Then Exit Sub
+            If exceptuada.Parent Is ws Then
+                For Each parte In exceptuada.Areas
+                    Set elegible = NeteoDependencias.ExcluirZona(elegible, parte)
+                    If elegible Is Nothing Then Exit Sub
+                Next parte
+            End If
+        End If
+    Next nombre
+    'No intervenir en tablas: su propagación de fórmulas pertenece a Excel, no a este auxiliar.
+    For Each tabla In ws.ListObjects
+        Set elegible = NeteoDependencias.ExcluirZona(elegible, tabla.Range)
+        If elegible Is Nothing Then Exit Sub
+    Next tabla
+    Set modelo = ObtenerHojaPlantilla()
+    protegida = ws.ProtectContents
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    If protegida Then ws.Unprotect Password:=CLAVE_HOJA
+    For inicio = primera To ultima Step TAMANO_BLOQUE
+        cantidad = Application.Min(TAMANO_BLOQUE, ultima - inicio + 1)
+        datos = ws.Cells(inicio, 1).Resize(cantidad, 7).Value2
+        extra = ws.Cells(inicio, 21).Resize(cantidad, 2).Value2
+        ReDim vacias(1 To cantidad)
+        For i = 1 To cantidad
+            vacias(i) = True
+            For j = 1 To 7
+                If Not IsEmpty(datos(i, j)) Then vacias(i) = False
+            Next j
+            For j = 1 To 2
+                If Not IsEmpty(extra(i, j)) Then vacias(i) = False
+            Next j
+        Next i
+        For columna = 8 To 20
+            If columna = 8 Then
+                patron = "=IF(RC[-6]=0, """", SUM(R2C2-RC[-6]))"
+            Else
+                If modelo Is Nothing Then GoTo SiguienteColumna
+                If Not modelo.Cells(PRIMERA_FILA, columna).HasFormula Then GoTo SiguienteColumna
+                patron = modelo.Cells(PRIMERA_FILA, columna).FormulaR1C1
+            End If
+            Set zona = Intersect(elegible, ws.Cells(inicio, columna).Resize(cantidad))
+            If zona Is Nothing Then GoTo SiguienteColumna
+            For Each parte In zona.Areas
+                Set encontradas = Nothing
+                If parte.CountLarge = 1 Then
+                    If parte.HasFormula Then Set encontradas = parte
+                Else
+                    On Error Resume Next
+                    Set encontradas = parte.SpecialCells(xlCellTypeFormulas)
+                    Err.Clear
+                    On Error GoTo Fallo
+                    If Not encontradas Is Nothing Then Set encontradas = Intersect(parte, encontradas)
+                End If
+                If Not encontradas Is Nothing Then
+                    For Each area In encontradas.Areas
+                        'No romper matrices, derrames ni combinaciones; ante duda se conserva el área.
+                        estado = area.HasArray
+                        If IsNull(estado) Then GoTo SiguienteArea
+                        If estado Then GoTo SiguienteArea
+                        estado = area.MergeCells
+                        If IsNull(estado) Then GoTo SiguienteArea
+                        If estado Then GoTo SiguienteArea
+                        On Error Resume Next
+                        Err.Clear
+                        estado = CallByName(area, "HasSpill", VbGet)
+                        If Err.Number <> 0 Then estado = False
+                        Err.Clear
+                        On Error GoTo Fallo
+                        If IsNull(estado) Then GoTo SiguienteArea
+                        If estado Then GoTo SiguienteArea
+                        formulas = area.FormulaR1C1
+                        desde = 0
+                        For i = 1 To area.Rows.Count + 1
+                            fila = area.Row + i - 1
+                            quitar = False
+                            If i <= area.Rows.Count Then
+                                If vacias(fila - inicio + 1) Then
+                                    If area.Rows.Count = 1 Then
+                                        formulaActual = CStr(formulas)
+                                    Else
+                                        formulaActual = CStr(formulas(i, 1))
+                                    End If
+                                    quitar = (StrComp(formulaActual, patron, vbBinaryCompare) = 0)
+                                    If columna = 8 And fila = siguiente Then quitar = False
+                                End If
+                            End If
+                            If quitar Then
+                                If desde = 0 Then desde = fila
+                            ElseIf desde > 0 Then
+                                Set borrarRango = ws.Range(ws.Cells(desde, columna), ws.Cells(fila - 1, columna))
+                                borrarRango.ClearContents
+                                'El respaldo debe recordar el vacío intencional y no revivir estas fórmulas.
+                                If EstaEnMantenimiento(ws) Then NeteoRespaldos.CapturarContenido borrarRango, respaldoMantenimiento, False, PRIMERA_FILA, TAMANO_BLOQUE
+                                desde = 0
+                            End If
+                        Next i
+SiguienteArea:
+                    Next area
+                End If
+            Next parte
+SiguienteColumna:
+        Next columna
+    Next inicio
+Salida:
+    RestaurarEstadoHoja ws, protegida, eventosAnteriores, pantallaAnterior, errorNumero, errorDescripcion
+    Exit Sub
+Fallo:
+    errorNumero = Err.Number: errorDescripcion = "Limpieza final de " & ws.Name & ": " & Err.Description
+    On Error Resume Next
+    If EstaEnMantenimiento(ws) Then FinalizarMantenimiento
+    On Error GoTo 0
+    GoTo Salida
 End Sub
 
 Sub ActualizarRespaldoDespuesDeEntrada(ByVal ws As Worksheet, ByVal Target As Range)
@@ -1266,15 +1415,8 @@ End Sub
 Private Sub RegistrarVaciosConservados(ByVal ws As Worksheet, ByVal zona As Range)
     Dim nombre As Name, anterior As Range, area As Range, vacias As Range
     For Each area In zona.Areas
-        Set vacias = Nothing
-        If area.CountLarge = 1 Then
-            If Not area.HasFormula And IsEmpty(area.Value2) Then Set vacias = area
-        Else
-            On Error Resume Next
-            Set vacias = area.SpecialCells(xlCellTypeBlanks)
-            On Error GoTo 0
-            If Not vacias Is Nothing Then Set vacias = Intersect(area, vacias)
-        End If
+        'Nombre histórico: ahora conserva todo contenido aceptado, no solo vacíos.
+        Set vacias = area
         'No eliminar excepciones previas: un fallo no puede borrar decisiones anteriores.
         If Not vacias Is Nothing Then
             For Each nombre In ThisWorkbook.Names
