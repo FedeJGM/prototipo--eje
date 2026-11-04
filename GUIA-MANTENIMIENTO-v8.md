@@ -28,10 +28,10 @@
 
 | Componente | Rutinas | Responsabilidad |
 |---|---:|---|
-| [Módulo 4 existente](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/Modulo-4-v7-corte2.txt) | 83 | Entradas públicas, configuración central, tres objetos privados, autorizaciones, importación, MENÚ, plantillas y coordinación. |
-| [NeteoValidaciones](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/NeteoValidaciones.txt) | 9 | Validación por bloques, fecha/valor, colores y listas/reglas. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
-| [NeteoDependencias](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/NeteoDependencias.txt) | 5 | Inspección de referencias y resta rectangular. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
-| [NeteoRespaldos](C:/Users/feder/Documents/Codex/2026-10-16/referenced-chatgpt-conversation-this-is-an/outputs/Version2/Modular-v7-Corte2-LimpiezaZonaGris/NeteoRespaldos.txt) | 6 | Crear respaldo temporal, capturar/restaurar contenido, comprobar compatibilidad del rango y copiar el archivo antes de eliminar. Sin estado de autorización. |
+| [Módulo 4 existente] | 83 | Entradas públicas, configuración central, tres objetos privados, autorizaciones, importación, MENÚ, plantillas y coordinación. |
+| [NeteoValidaciones] | 9 | Validación por bloques, fecha/valor, colores y listas/reglas. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
+| [NeteoDependencias] | 5 | Inspección de referencias y resta rectangular. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
+| [NeteoRespaldos] | 6 | Crear respaldo temporal, capturar/restaurar contenido, comprobar compatibilidad del rango y copiar el archivo antes de eliminar. Sin estado de autorización. |
 
 **103 rutinas en los cuatro componentes de Módulo 4 (83/9/5/6), más BorrarDatos en Módulo 1.** Conserva las 65 firmas públicas originales y añade un auxiliar público con argumentos para comunicar Módulo 1 con Módulo 4. Cambian solo ActualizarEntradaEnHoja y RegistrarVaciosConservados entre las 82 rutinas anteriores; las otras 80, incluida AgregarFilaMenu, permanecen byte idénticas. No cambia el estado de módulo. Los tres componentes internos son byte idénticos.
 
