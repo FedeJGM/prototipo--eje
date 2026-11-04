@@ -2,6 +2,8 @@ Option Explicit
 
 Public Const CLAVE_HOJA As String = "EJEMPLO"
 Private Const PRIMERA_FILA As Long = 12
+'Base preparada que se conserva; no limita la cantidad de registros del libro.
+Private Const ULTIMA_FILA_BASE As Long = 1000
 Private Const TAMANO_BLOQUE As Long = 10000
 'Estos tres objetos pertenecen al coordinador y solo viven durante la sesión autorizada.
 'NeteoRespaldos recibe el libro temporal; no decide cuándo conceder o finalizar permisos.
@@ -780,8 +782,8 @@ Fallo:
 End Sub
 
 '============================================================================
-' [G5] Entradas, última fila y fórmulas calculadas (8 rutinas aquí)
-'Actualización: este grupo incluye ahora 9 rutinas con el auxiliar de limpieza final.
+' [G5] Entradas, última fila y fórmulas calculadas (10 rutinas aquí)
+'Actualización: este grupo incluye ahora 10 rutinas con limpieza final y recuperación manual de la base.
 '============================================================================
 
 Function FilaTieneDatosEntrada(ByVal ws As Worksheet, ByVal fila As Long) As Boolean
@@ -882,7 +884,7 @@ Private Sub CompletarFormulasZonaGris(ByVal ws As Worksheet, ByVal primera As Lo
     Next columna
 End Sub
 
-Private Sub CompletarColumnaCalculada(ByVal ws As Worksheet, ByVal columna As Long, ByVal primera As Long, ByVal ultima As Long)
+Private Sub CompletarColumnaCalculada(ByVal ws As Worksheet, ByVal columna As Long, ByVal primera As Long, ByVal ultima As Long, Optional ByVal soloContenido As Boolean = False)
     Dim inicio As Long, cantidad As Long, zona As Range, vacias As Range, area As Range, exceptuada As Range
     Dim nombre As Name, modelo As Worksheet, separador As String
     Set modelo = ObtenerHojaPlantilla()
@@ -919,9 +921,14 @@ Private Sub CompletarColumnaCalculada(ByVal ws As Worksheet, ByVal columna As Lo
                 'Solo se rellenan vacíos elegibles después de descontar las excepciones conservadas.
                 'H calcula la antigüedad contra B2; las otras columnas usan el modelo y exigen su fórmula.
                 If columna = 8 Then
-                    separador = Application.International(xlListSeparator)
-                    area.Cells(1, 1).FormulaLocal = Replace("=SI(B" & area.Row & "=0, """", SUMA($B$2-B" & area.Row & "))", ",", separador)
-                    If area.Rows.Count > 1 Then area.FillDown
+                    'La recuperación manual evita que FillDown copie formatos o validaciones.
+                    If soloContenido Then
+                        area.FormulaR1C1 = "=IF(RC[-6]=0, """", SUM(R2C2-RC[-6]))"
+                    Else
+                        separador = Application.International(xlListSeparator)
+                        area.Cells(1, 1).FormulaLocal = Replace("=SI(B" & area.Row & "=0, """", SUMA($B$2-B" & area.Row & "))", ",", separador)
+                        If area.Rows.Count > 1 Then area.FillDown
+                    End If
                 Else
                     If modelo Is Nothing Then Err.Raise 5, , "No se encontró PLANTILLA."
                     If Not modelo.Cells(PRIMERA_FILA, columna).HasFormula Then Err.Raise 5, , "Falta una fórmula modelo de PLANTILLA en la columna " & columna
@@ -945,7 +952,8 @@ Public Sub LimpiarFormulasFinalesVacias(ByVal ws As Worksheet, ByVal primera As 
     Dim errorNumero As Long, errorDescripcion As String
     If EsHojaTecnica(ws.Name) Then Exit Sub
     If Not (ws.Parent Is ThisWorkbook) Then Exit Sub
-    primera = Application.Max(PRIMERA_FILA, primera, ultimaEntrada + 1)
+    'La base preparada no es crecimiento sobrante: excluirla antes de buscar o limpiar.
+    primera = Application.Max(ULTIMA_FILA_BASE + 1, primera, ultimaEntrada + 1)
     If ultima > ws.Rows.Count Or primera > ultima Then Exit Sub
     siguiente = Application.Max(PRIMERA_FILA, ultimaEntrada + 1)
     Set elegible = ws.Range("H" & primera & ":T" & ultima)
@@ -1077,6 +1085,102 @@ Fallo:
     If EstaEnMantenimiento(ws) Then FinalizarMantenimiento
     On Error GoTo 0
     GoTo Salida
+End Sub
+
+'Punto de entrada: RecuperarBaseZonaGris, ejecución manual solo en la hoja operativa afectada.
+'Propósito: reponer vacíos elegibles de H12:T1000 una vez, sin tocar contenido ni decisiones conservadas.
+'Llamado por: Alt+F8 con mantenimiento ya autorizado; nunca por edición, apertura o guardado.
+'Protección/salida: conserva el permiso; sincroniza su respaldo e intenta recuperar el estado previo si falla.
+Public Sub RecuperarBaseZonaGris()
+    Dim ws As Worksheet, modelo As Worksheet, zona As Range, respaldoPrevio As Workbook
+    Dim columna As Long, protegida As Boolean, eventosAnteriores As Boolean, pantallaAnterior As Boolean
+    Dim intento As Boolean, conservarRespaldo As Boolean, falloRecuperacion As Boolean, detalle As String
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+    Set ws = ActiveSheet
+    If Not (ws.Parent Is ThisWorkbook) Then Exit Sub
+    If EsHojaTecnica(ws.Name) Then Exit Sub
+    If RecuperarMantenimientoInterrumpido(ws) Then Exit Sub
+    If Not EstaEnMantenimiento(ws) Then
+        MsgBox "Primero ejecute DesbloquearHoja en esta hoja y elija Otra acción (mantenimiento). Luego vuelva a ejecutar RecuperarBaseZonaGris.", vbExclamation
+        Exit Sub
+    End If
+    protegida = ws.ProtectContents
+    eventosAnteriores = Application.EnableEvents: pantallaAnterior = Application.ScreenUpdating
+    On Error GoTo Fallo
+    If respaldoMantenimiento Is Nothing Then Err.Raise 5, , "No existe un respaldo de mantenimiento fiable."
+    Set modelo = ObtenerHojaPlantilla()
+    If modelo Is Nothing Then Err.Raise 5, , "No se encontró PLANTILLA. No se recuperó la base."
+    'Comprobar todos los modelos antes de escribir: no empezar una recuperación que ya es incompleta.
+    For columna = 9 To 20
+        If Not modelo.Cells(PRIMERA_FILA, columna).HasFormula Then Err.Raise 5, , "Falta una fórmula modelo de PLANTILLA en la columna " & columna
+    Next columna
+    Set zona = ws.Range("H" & PRIMERA_FILA & ":T" & ULTIMA_FILA_BASE)
+    NeteoRespaldos.VerificarContenidoRestaurable zona
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    'Respaldo local acotado: el snapshot vigente no se reemplaza antes de tener la recuperación completa.
+    Set respaldoPrevio = NeteoRespaldos.CrearRespaldo()
+    NeteoRespaldos.CapturarContenido zona, respaldoPrevio, False, PRIMERA_FILA, TAMANO_BLOQUE
+    If protegida Then ws.Unprotect Password:=CLAVE_HOJA
+    intento = True
+    'H usa solo contenido para no propagar formatos/validaciones mediante FillDown.
+    CompletarColumnaCalculada ws, 8, PRIMERA_FILA, ULTIMA_FILA_BASE, True
+    CompletarFormulasZonaGris ws, PRIMERA_FILA, ULTIMA_FILA_BASE
+    NeteoRespaldos.CapturarContenido zona, respaldoMantenimiento, False, PRIMERA_FILA, TAMANO_BLOQUE
+    GoTo Salida
+Fallo:
+    detalle = Err.Description
+    On Error Resume Next
+    If intento And Not respaldoPrevio Is Nothing Then
+        Err.Clear
+        NeteoRespaldos.RestaurarContenido zona, respaldoPrevio, False, PRIMERA_FILA, TAMANO_BLOQUE
+        If Err.Number <> 0 Then
+            falloRecuperacion = True
+            detalle = detalle & " No se recuperó todo el contenido anterior: " & Err.Description
+        End If
+        If Not falloRecuperacion Then
+            Err.Clear
+            NeteoRespaldos.CapturarContenido zona, respaldoMantenimiento, False, PRIMERA_FILA, TAMANO_BLOQUE
+            If Err.Number <> 0 Then
+                falloRecuperacion = True
+                detalle = detalle & " No se sincronizó el respaldo anterior: " & Err.Description
+            End If
+        End If
+        If falloRecuperacion Then
+            'No seguir manteniendo con un snapshot dudoso; dejar visible la copia local previa.
+            conservarRespaldo = True
+            Err.Clear
+            FinalizarMantenimiento
+            If Err.Number <> 0 Then detalle = detalle & " No se cerró el mantenimiento: " & Err.Description
+            detalle = detalle & " Se conserva abierto el respaldo temporal previo para revisión."
+        End If
+    End If
+    On Error GoTo 0
+Salida:
+    On Error Resume Next
+    If Not respaldoPrevio Is Nothing Then
+        Err.Clear
+        If conservarRespaldo Then
+            respaldoPrevio.Windows(1).Visible = True
+        Else
+            respaldoPrevio.Close SaveChanges:=False
+            If Err.Number <> 0 Then
+                detalle = detalle & " No se cerró el respaldo temporal: " & Err.Description
+                respaldoPrevio.Windows(1).Visible = True
+            End If
+        End If
+    End If
+    Err.Clear
+    ws.Activate
+    If Err.Number <> 0 Then detalle = detalle & " No se pudo volver a la hoja: " & Err.Description
+    Err.Clear
+    RestaurarEstadoHoja ws, protegida, eventosAnteriores, pantallaAnterior, 0, ""
+    If Err.Number <> 0 Then detalle = detalle & " " & Err.Description
+    On Error GoTo 0
+    If detalle <> "" Then
+        MsgBox "No se completó la recuperación de la base: " & detalle, vbCritical
+    Else
+        MsgBox "Base H12:T" & ULTIMA_FILA_BASE & " revisada. Se completaron únicamente vacíos elegibles; el mantenimiento sigue habilitado. Termine con VolverAProtegerHoja.", vbInformation
+    End If
 End Sub
 
 Sub ActualizarRespaldoDespuesDeEntrada(ByVal ws As Worksheet, ByVal Target As Range)
