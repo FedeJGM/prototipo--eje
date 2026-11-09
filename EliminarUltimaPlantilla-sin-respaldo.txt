@@ -1,0 +1,98 @@
+﻿Sub EliminarUltimaPlantilla()
+    Dim wsMenu As Worksheet, wsEliminar As Worksheet, zona As Range
+    Dim clave As String, nombre As String, numero As Long, fila As Long, mensaje As String
+    Dim eventos As Boolean, pantalla As Boolean, alertas As Boolean, ventanas As Boolean
+    Dim anteriores As Variant, cambioMenu As Boolean, eliminada As Boolean, detalle As String
+    Dim paso As String, numeroError As Long, descripcionError As String
+    eventos = Application.EnableEvents: pantalla = Application.ScreenUpdating: alertas = Application.DisplayAlerts
+    ventanas = ThisWorkbook.ProtectWindows
+    On Error GoTo Fallo
+    If ThisWorkbook.ReadOnly Then
+        MsgBox "El libro está abierto en modo de solo lectura. No se eliminó ninguna plantilla.", vbExclamation
+        Exit Sub
+    End If
+    paso = "Localizar MENÚ"
+    Set wsMenu = ObtenerHojaMenu()
+    If wsMenu Is Nothing Then Err.Raise 5, , "No se encontró MENÚ."
+    clave = InputBox("Ingrese la contraseña para eliminar la última plantilla. Esta ventana muestra los caracteres escritos.", "Eliminar plantilla")
+    If clave = "" Then Exit Sub
+    If clave <> CLAVE_HOJA Then
+        MsgBox "Contraseña incorrecta. No se eliminó ninguna plantilla.", vbExclamation
+        Exit Sub
+    End If
+    clave = vbNullString
+    paso = "Revisar mantenimiento de MENÚ"
+    If RecuperarMantenimientoInterrumpido(wsMenu) Then Exit Sub
+    paso = "Comprobar secuencia de plantillas"
+    numero = VerificarSecuenciaPlantillas()
+    If numero <= 1 Then Err.Raise 5, , "No se permite eliminar PLANTILLA 01 ni la hoja modelo PLANTILLA. No hay una plantilla adicional para eliminar."
+    nombre = "PLANTILLA " & Format(numero, "00"): fila = numero + 9
+    paso = "Obtener hoja " & nombre
+    Set wsEliminar = ThisWorkbook.Worksheets(nombre)
+    paso = "Revisar mantenimiento de " & nombre
+    If EstaEnMantenimiento(wsEliminar) Then Err.Raise 5, , "Finalice el mantenimiento de " & nombre & " antes de eliminarla."
+    If RecuperarMantenimientoInterrumpido(wsEliminar) Then Exit Sub
+    Set zona = wsMenu.Range("K" & fila & ":L" & fila)
+    paso = "Comprobar rango MENÚ!" & zona.Address(False, False)
+    NeteoRespaldos.VerificarContenidoRestaurable zona
+    paso = "Revisar dependencias de " & nombre
+    NeteoDependencias.VerificarDependenciasPlantilla nombre, fila, TAMANO_BLOQUE
+    mensaje = "Se eliminará únicamente " & nombre & ", asociada a la fila " & fila & " de MENÚ." & vbCrLf
+    paso = "Buscar entradas en " & nombre & " (A:G y U:V)"
+    If ObtenerUltimaFilaEntrada(wsEliminar) >= PRIMERA_FILA Then _
+        mensaje = mensaje & "ATENCIÓN: contiene datos de entrada que se perderán de este libro." & vbCrLf
+    mensaje = mensaje & "Se conservarán las cuentas y la fila de MENÚ. K/L quedarán visualmente vacías." & vbCrLf & _
+        "No se creará una copia de respaldo. La eliminación no se puede deshacer con Ctrl+Z." & vbCrLf & "¿Desea continuar?"
+    paso = "Solicitar confirmación de eliminación"
+    If MsgBox(mensaje, vbYesNo + vbExclamation + vbDefaultButton2, "Eliminar " & nombre) <> vbYes Then Exit Sub
+    paso = "Ejecutar eliminación confirmada"
+    Application.EnableEvents = False: Application.ScreenUpdating = False
+    ProtegerEstructuraLibro ventanas
+    anteriores = zona.FormulaR1C1
+    ThisWorkbook.Unprotect Password:=CLAVE_HOJA
+    If ThisWorkbook.ProtectStructure Then Err.Raise 5, , "No se pudo habilitar la estructura para eliminar la plantilla."
+    wsMenu.Unprotect Password:=CLAVE_HOJA
+    cambioMenu = True
+    zona.Formula = "="""""
+    Application.DisplayAlerts = False
+    'Tras el borrado efectivo, no se recrea la hoja si ocurre un fallo posterior.
+    wsEliminar.Delete
+    eliminada = True
+    If EstaEnMantenimiento(wsMenu) Then NeteoRespaldos.CapturarContenido zona, respaldoMantenimiento, EsMenu(zona.Parent), PRIMERA_FILA, TAMANO_BLOQUE
+    wsMenu.Activate
+Salida:
+    On Error Resume Next
+    Err.Clear: ProtegerHojaTrabajo wsMenu
+    If Err.Number <> 0 Then detalle = detalle & " No se protegió MENÚ: " & Err.Description
+    Err.Clear: ProtegerEstructuraLibro ventanas
+    If Err.Number <> 0 Then detalle = detalle & " No se protegió la estructura: " & Err.Description
+    Application.DisplayAlerts = alertas
+    Application.ScreenUpdating = pantalla: Application.EnableEvents = eventos
+    On Error GoTo 0
+    If detalle <> "" Then
+        If eliminada Then detalle = "La hoja sí se eliminó, pero ocurrió un fallo posterior. " & detalle
+        MsgBox "No se completó toda la operación: " & detalle, vbCritical
+    Else
+        MsgBox "Se eliminó " & nombre & ". La fila " & fila & " de MENÚ permanece preparada.", vbInformation
+    End If
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description
+    detalle = "Paso: " & paso & vbCrLf & "Error " & numeroError & ": " & descripcionError
+    On Error Resume Next
+    If cambioMenu And Not eliminada Then
+        Err.Clear
+        zona.FormulaR1C1 = anteriores
+        If Err.Number <> 0 Then detalle = detalle & " No se restauró K/L: " & Err.Description
+    End If
+    If cambioMenu And EstaEnMantenimiento(wsMenu) Then
+        Err.Clear: NeteoRespaldos.CapturarContenido zona, respaldoMantenimiento, EsMenu(zona.Parent), PRIMERA_FILA, TAMANO_BLOQUE
+        If Err.Number <> 0 Then
+            detalle = detalle & " Se cerrará el mantenimiento porque no se actualizó su respaldo: " & Err.Description
+            Err.Clear: FinalizarMantenimiento
+            If Err.Number <> 0 Then detalle = detalle & " No se finalizó el mantenimiento: " & Err.Description
+        End If
+    End If
+    On Error GoTo 0
+    GoTo Salida
+End Sub
