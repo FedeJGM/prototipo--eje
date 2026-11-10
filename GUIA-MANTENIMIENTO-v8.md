@@ -1,372 +1,102 @@
-# Guía de mantenimiento — v7 corte 2 con limpieza final de zona gris
+# Guía de mantenimiento del libro de neteo v8
 
-## Ruta rápida
+Esta guía describe el Módulo 4 v8, su integración con el libro `.xlsm` y el botón **Exportar datos**. Las dos variantes comparten los flujos de validación, protección y gestión de hojas. La diferencia está en cómo conservan los formatos y el sistema de fechas en el `.xlsx` de salida. **Instale una sola variante.**
 
-**Limpieza final acotada:** al reducir entradas, retirar únicamente fórmulas automáticas del tramo final afectado y vacío, conservando H de la siguiente fila y las decisiones de mantenimiento. Se modifica Módulo 4 y se entrega Módulo 1 compatible. No es otra modularización.
+[Instalación y reversión](#instalación-y-reversión) · [Mapa del proyecto](#mapa-del-proyecto) · [Operación del libro](#operación-del-libro) · [Exportación de datos](#exportación-de-datos) · [Diagnóstico](#diagnóstico) · [Pruebas de aceptación](#pruebas-de-aceptación)
 
-1. Trabajar en una copia íntegra. Con el código anterior completo, finalizar mantenimiento/autorización y pausar Autoguardado. Conservar la pareja de fuentes anterior. Si cambió CLAVE_HOJA, coordinar la adaptación sin publicar la clave ni reponer una antigua.
-2. Con el corte 2 modular instalado, reemplazar TODO el contenido del Módulo 4 existente por Modulo-4-v7-corte2.txt y TODO el Módulo 1 de BorrarDatos por Modulo-1-limpieza-zona-gris.txt. Si su Módulo 1 contiene otras rutinas/cambios, no sobrescribirlo: comparar e integrar la única Sub BorrarDatos. Mantener los nombres reales, incluido acento. Instalar ambos antes de ejecutar.
-3. Los tres módulos internos adjuntos son byte idénticos a la entrega anterior; no es necesario sustituirlos si ya coinciden. Si aún no están instalados, seguir LEEME para instalar el conjunto completo. No duplicar Módulo 4 ni BorrarDatos.
-4. Durante la sustitución parcial NO ejecutar macros, guardar, cerrar ni cambiar de hoja. Compilar el proyecto cuando todo esté completo y probar en copia los casos de esta guía. No se ha compilado ni ejecutado VBA/Excel durante la verificación de estos TXT.
-5. No sustituir ThisWorkbook ni Módulos 2/3, no cambiar figuras ni la contraseña por este ajuste.
+## Instalación y reversión
 
-### Criterio autorizado y límites de la limpieza
-
-- En el tramo final afectado y realmente vacío de A:G/U:V, las fórmulas históricas idénticas al modelo y sin marca se consideran automáticas. Es el criterio aprobado: no existe información histórica para distinguir una coincidencia previamente aceptada de una fórmula generada automáticamente.
-- Desde esta entrega, conservar un cambio en mantenimiento registra toda la zona aceptada, incluidas fórmulas y constantes; RegistrarVaciosConservados mantiene su nombre histórico, reutiliza las excepciones y descuenta rangos ya registrados. No crea nombres por cada fórmula automática.
-- Fórmulas diferentes, constantes, excepciones/vacíos conservados y las nuevas decisiones autorizadas, aunque coincidan con el modelo, se preservan. No se comparan resultados de cálculo para decidir qué borrar.
-- Comparación conservadora y exacta con FormulaR1C1 del modelo I:T y la fórmula especial H: diferencias de escritura se conservan, no se normalizan literales de texto ni se reconstruyen vínculos.
-- Una fila intermedia vacía o una fila con cualquier entrada (incluido F/U/V, cero, error o una fórmula que devuelva vacío) no se limpia. Se mantiene H de la siguiente fila; si no quedan entradas, H12, respetando sus excepciones.
-- Módulo 4 valida primero las filas editadas y prepara H:T solo hasta la última entrada real; no rellena las filas finales para borrarlas después. El nuevo auxiliar limita su trabajo al intervalo afectado y al contenido existente, por bloques y rangos contiguos; no recorre celda por celda toda la hoja ni todas las hojas por cada edición. La validación existente conserva su alcance sobre Target: un borrado de columnas completas puede seguir siendo costoso.
-- BorrarDatos conserva sus ClearContents completos de A:G/U:V; captura el límite de entradas antes de borrar y llama al mismo auxiliar con eventos desactivados. No usa ese límite para recortar el borrado de entradas.
-- No es una limpieza inicial del sobrante histórico no afectado. Al borrar hasta 1050, las fórmulas antiguas fuera de ese intervalo se conservan. Con BorrarDatos se limpia solo hasta el último registro anterior; no promete quitar todas las fórmulas históricas posteriores.
-- No borra formatos, validaciones, comentarios ni filas físicas. No toca MENÚ/DATOS/ALCON/PLANTILLA. Se omiten tablas, matrices, derrames o combinaciones y se conserva el tramo si una excepción no puede resolverse con seguridad.
-- Durante mantenimiento se actualiza el respaldo después de cada rango limpiado para que una recuperación no lo reviva. Ante fallo se intenta cerrar mantenimiento y restaurar protección/eventos/pantalla; no se promete deshacer un borrado manual o de BorrarDatos.
-- No hay una nueva medición de tamaño ni tiempo. El formato, los vínculos y el rango usado pueden seguir influyendo en el archivo después de limpiar fórmulas.
-
-## 1. Mapa de responsabilidades del corte 2
-
-| Componente | Rutinas | Responsabilidad |
-|---|---:|---|
-| [Módulo 4 existente] | 83 | Entradas públicas, configuración central, tres objetos privados, autorizaciones, importación, MENÚ, plantillas y coordinación. |
-| [NeteoValidaciones] | 9 | Validación por bloques, fecha/valor, colores y listas/reglas. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
-| [NeteoDependencias] | 5 | Inspección de referencias y resta rectangular. Archivo byte idéntico al corte 2 documentado; sin cambios en esta entrega. |
-| [NeteoRespaldos] | 6 | Crear respaldo temporal, capturar/restaurar contenido, comprobar compatibilidad del rango y copiar el archivo antes de eliminar. Sin estado de autorización. |
-
-**103 rutinas en los cuatro componentes de Módulo 4 (83/9/5/6), más BorrarDatos en Módulo 1.** Conserva las 65 firmas públicas originales y añade un auxiliar público con argumentos para comunicar Módulo 1 con Módulo 4. Cambian solo ActualizarEntradaEnHoja y RegistrarVaciosConservados entre las 82 rutinas anteriores; las otras 80, incluida AgregarFilaMenu, permanecen byte idénticas. No cambia el estado de módulo. Los tres componentes internos son byte idénticos.
-
-### Fronteras internas y propiedad del estado
-
-- NeteoRespaldos lleva `Option Explicit` y `Option Private Module`. Public dentro del proyecto: `CrearRespaldo`, `CapturarContenido`, `RestaurarContenido`, `VerificarContenidoRestaurable`, `GuardarRespaldoPlantilla`. `TextosLiterales` sigue Private y no se duplica.
-- `CapturarContenido` y `RestaurarContenido` reciben tres ByVal finales: si la hoja es MENÚ, primera fila de entradas y tamaño de bloque. Módulo 4 evalúa su `EsMenu` privado sobre la misma hoja del rango y transmite sus constantes originales. Dentro se mantiene el límite 10 para MENÚ y el valor original de `PRIMERA_FILA` para operativas (12); no se copian números a cada llamada.
-- La propiedad y vida del respaldo siguen en Módulo 4: `hojaMantenimiento`, `respaldoMantenimiento`, `hojaCuentasMenu` permanecen juntos y Private. No se autoriza, conserva ni termina mantenimiento desde el componente de respaldos.
-- `CLAVE_HOJA`, `PRIMERA_FILA`, `TAMANO_BLOQUE` y `PREFIJO_CONSERVAR` no se mueven ni duplican. No publicar la clave ni cambiarla aisladamente. Los componentes no usan estado de autorización global nuevo.
-- Los módulos de validaciones/dependencias conservan las ocho APIs internas del corte 1. `Option Private Module` permite Public dentro del proyecto, no hacia proyectos referenciantes; no transforma una variable Public en Private ni añade seguridad a Excel.
-- Sigue siendo separación gradual: importación, MENÚ y protección comparten coordinación en Módulo 4. No se presentan capas completamente independientes ni se trasladan excepciones/nombres definidos por este corte.
-
-### Seguir un respaldo sin perder su dueño
-
-| Inicio en Módulo 4 | Auxiliar de NeteoRespaldos | Quién conserva decisiones/salida |
+| Archivo del Módulo 4 | Cuerpo del `.xlsx` | Elegir cuando… |
 |---|---|---|
-| `ImportarDatosDesdeArchivoExcel` | CrearRespaldo → VerificarContenidoRestaurable → CapturarContenido; RestaurarContenido en el fallo manejado | Importación conserva el rango, la confirmación, formato/validación, cierre del respaldo, protección y banderas. |
-| `DesbloquearHoja` / `GestionarCambioMantenimiento` | CrearRespaldo, CapturarContenido, RestaurarContenido | Módulo 4 conserva autorización, decisión conservar/recuperar y referencia al respaldo anterior. |
-| `ActualizarRespaldoDespuesDeEntrada`, filas/vínculos de MENÚ | CapturarContenido | Módulo 4 selecciona solo las celdas afectadas y sigue siendo dueño de su snapshot. |
-| `VerificarZonaMantenimiento` | VerificarContenidoRestaurable | Se conservan las comprobaciones previas de combinadas, matrices, derrames y tablas, sin omitirlas. |
-| `EliminarUltimaPlantilla` | GuardarRespaldoPlantilla | Se copia el archivo completo antes de la primera mutación destructiva; confirmar/borrar y restaurar estados permanece en Módulo 4. No guarda automáticamente el original. |
+| [Modulo-4-v8.txt](Modulo-4-v8.txt) | Valores con el `NumberFormat` de origen por celda: números, fechas, horas y formatos personalizados. Usa el sistema de fechas del libro origen. | Importa conservar la presentación numérica o de fechas. |
+| [Modulo-4-v8-valores.txt](Modulo-4-v8-valores.txt) | Valores con formato `General`. Una fecha puede verse como número de serie. | Se necesita una salida sin formato numérico de origen. |
 
-`TextosLiterales` conserva el tratamiento original de textos que comienzan con `=`, otros textos, escalares/matrices, booleanos y valores de error. El corte no cambia el algoritmo de Value2/FormulaR1C1 ni corrige diferencias de representación COM. El snapshot temporal y el respaldo persistente de archivo siguen siendo conceptos distintos.
+1. Guarde una copia íntegra del `.xlsm` anterior. Trabaje en otra copia, pause Autoguardado y cierre las autorizaciones vigentes con el código anterior completo. Conserve las fuentes del punto de partida.
+2. Sustituya **todo el contenido del Módulo 4 existente** por el TXT elegido. Mantenga el nombre real del módulo. No anexe el TXT al código anterior ni importe las dos variantes. Si el libro tiene una clave administrada distinta de la base, coordine la integración sin publicar ni reponer una clave anterior.
+3. Si la pareja Base1000 ya está instalada, conserve los módulos compatibles y `ThisWorkbook`. Si parte de una versión anterior, contraste el [mapa del proyecto](#mapa-del-proyecto) y complete el conjunto antes de ejecutar, guardar, cerrar o cambiar de hoja. No sustituya rutinas locales de los otros módulos indiscriminadamente.
+4. Use **Depuración → Compilar proyecto VBA** en la copia. Asigne el botón **Exportar datos** a `ExportarDatos` y el botón de renombrado a `RenombrarPlantillaConCuif`, si corresponde. No reasigne los botones anteriores que ya apunten a sus macros. Complete las pruebas antes de instalar en uso habitual.
 
-La medición del usuario **48,727 s → 2,391 s** pertenece a la optimización anterior de la revisión previa a confirmar, en un caso. La limpieza actual tampoco garantiza esos tiempos ni una mejora de tamaño o corrección end-to-end sin probar el libro.
+**Reversión:** descarte la copia de prueba si falla. Si solo cambió código y el libro no cambió de estado, reponga el conjunto compatible del punto de partida y compile. **Después de renombrar o eliminar hojas, o cambiar cuentas, fórmulas o enlaces en el libro, restaure el `.xlsm` completo anterior.** Reponer código no deshace nombres, referencias ni pérdidas de datos. Un `.xlsx` exportado no sustituye ese respaldo.
 
-### Botones/macros: asignaciones esperadas
+## Mapa del proyecto
 
-Este mapa muestra los procedimientos previstos, **no certifica las asignaciones reales de las figuras**: no se inspeccionó el libro instalado. Conservar nombres de módulos, macros, argumentos y visibilidad; no asignar una función auxiliar como sustituto de un botón. **No eliminar una rutina porque no se vea llamada desde el código**: puede estar asignada a una figura o invocada externamente; falta un inventario real de OnAction.
-
-| Acción prevista | Procedimiento | Responsabilidad y hojas |
-|---|---|---|
-| Validar entradas | `ValidarTodo_ReglasNegocio` | Hoja operativa activa; valida, marca y aplica las correcciones existentes. |
-| Importar valores | `ImportarDatosDesdeArchivoExcel` | Rango origen y destino operativo editable; sin reorganizar columnas. |
-| Desbloquear/autorizar | `DesbloquearHoja` | MENÚ: cuentas A/B o mantenimiento A:L; operativa: mantenimiento A:V. |
-| Volver a proteger | `VolverAProtegerHoja` | Cierra autorización/mantenimiento y restaura bloqueos funcionales. |
-| Agregar fila MENÚ | `AgregarFilaMenu` | Según última información A/B, prepara un destino vacío, conserva uno completamente formulado o detiene contenido incompleto/inesperado. No crea hoja. |
-| Eliminar última fila MENÚ | `EliminarUltimaFilaMenu` | Limpia A:L, sin desplazamientos; nunca fila 10; bloquea una hoja asociada. |
-| Crear plantilla | `CrearNuevaHojaDesdePlantilla` | Copia PLANTILLA, crea PLANTILLA nn y enlaza MENÚ. |
-| Eliminar última plantilla | `EliminarUltimaPlantilla` | Solo última numerada permitida, con clave, confirmación y respaldo completo. Conserva su fila de MENÚ. |
-| Configurar validaciones, uso técnico | `ConfigurarValidacionesEntradaHojaActiva` | Repone reglas de la operativa; no sustituye las pruebas de negocio. |
-| Restablecer protección, automático/técnico | `RestablecerProteccionAlAbrir` | MENÚ/operativas y estructura; no migra por sí solo la protección del modelo. |
-| Borrar datos, Módulo 1 | `BorrarDatos` | Borra entradas completas y llama la limpieza final compartida con límite anterior; conserva la preparación mínima y los estados previos. |
-| Reclasificación, Módulo 2 | `copiar_reclasificacion` | Libro de salida Hoja1/Hoja2 según su código actual; no se cambió aquí. |
-| ALCON, Módulo 3 | `ALCON` | Operativa → hoja ALCON → libro de salida; restaura visibilidad y estructura según su versión actual. |
-
-### Eventos de ThisWorkbook: llamadas directas verificadas
-
-Los eventos permanecen en **ThisWorkbook**, no en Módulo 4: Excel los despacha por su ubicación/nombre. La tabla enumera llamadas directas presentes; no significa que todas se ejecuten incondicionalmente.
-
-| Evento real | Llamadas directas a Módulo 4 | Efecto |
-|---|---|---|
-| `Workbook_Open` | `RestablecerProteccionAlAbrir` | Reponer protección y finalizar autorizaciones previas; si falla, no editar/guardar sin revisar. |
-| `Workbook_SheetChange` | `RecuperarMantenimientoInterrumpido`, `EsHojaTecnica`, `EstaEnMantenimiento`, `GestionarCambioMantenimiento`, `ActualizarEntradaEnHoja`, `ActualizarRespaldoDespuesDeEntrada` | Decidir mantenimiento antes de preparar/validar las entradas afectadas; restaurar eventos y pantalla. |
-| `Workbook_BeforeSave` | `FinalizarMantenimiento`, `RestablecerProteccionAlAbrir`, `ValidarTodasLasHojasTrabajo` | Finalizar autorización, reponer protección y bloquear guardado si hay entradas operativas inválidas o un error. |
-| `Workbook_BeforeClose` | `FinalizarMantenimiento` | Finalizar mantenimiento; si falla, cancelar cierre. |
-| `Workbook_SheetDeactivate` | — | Recordar si la hoja que se abandona es MENÚ; no llama directamente a Módulo 4. |
-| `Workbook_SheetActivate` | `AvisarSalidaMenu` | Si hay una salida pendiente de MENÚ dentro del libro, preguntar si se conserva la autorización. |
-| `Workbook_Deactivate` | — | Limpiar la salida pendiente al cambiar de libro/ventana; no equivale a un cambio de pestaña interno. |
-
-
-## 2. Contrato de hojas y columnas
-
-| Área | Entrada normal | Cálculo/protección |
-|---|---|---|
-| Operativas, desde fila 12 | A:G y U:V | H:T calculadas/bloqueadas; encabezados A1:V11 y W en adelante bloqueados fuera de mantenimiento. V es obligatoria cuando la fila tiene datos. |
-| MENÚ | Ninguna celda editable por defecto | Autorización de cuentas: solo A/B desde fila 10. Mantenimiento: A:L, incluidos encabezados. M en adelante sigue bloqueada. |
-| PLANTILLA | Modelo de copia, no una operativa numerada | No reemplazarlo para resolver un cambio autorizado de una celda de otra hoja. |
-| DATOS/ALCON | Hojas técnicas fuera del desbloqueo funcional normal | DATOS se consulta como catálogo; ALCON interviene en su exportación propia. Su protección de hoja no se migra aquí. |
-
-**H no se reconstruye igual que I:T.** `PrepararFilasEntrada` llama a `CompletarColumnaCalculada` con columna 8: H usa la fórmula especial de fecha de origen B contra corte $B$2; para fila 12: `=SI(B12=0,"",SUMA($B$2-B12))`. El separador visible puede variar por configuración de Excel. `CompletarFormulasZonaGris` recorre columnas 9…20 (**I:T**) y utiliza las fórmulas modelo de fila 12 de PLANTILLA. La recuperación rellena vacíos elegibles y respeta las excepciones conservadas; no reescribe indiscriminadamente todas las fórmulas.
-
-**PLANTILLA y PLANTILLA 01 son distintas.** La primera se copia para crear nuevas hojas. K10/L10 de MENÚ sirven como modelo y deben conservar su referencia a PLANTILLA 01. La secuencia numerada y la relación número+9 con la fila de MENÚ se comprueban antes de crear/eliminar; los huecos intermedios bloquean y no se renumeran automáticamente. Una última hoja reconstruida desde el modelo no recupera sus datos borrados.
-
-El validador global recorre hojas no clasificadas como técnicas por `EsHojaTecnica`. Guardar desde MENÚ también dispara el evento del libro y revisa esas operativas; no significa que MENÚ/DATOS/ALCON/PLANTILLA pasen por el mismo validador de entradas.
-
-## 3. Seguir un flujo real sin perder el contexto
-
-### Importar valores
-
-`ImportarDatosDesdeArchivoExcel` solicita origen/rango y usa el destino editable elegido. Comprueba el bloque completo antes de pegar: debe caber en A:G o U:V y no ser el propio libro origen. Confirma reemplazo de datos existentes y respalda el rango que se reemplazará; no reorganiza columnas. Tras importar, valida/prepara las filas afectadas, marca errores y mantiene el bloqueo de guardado hasta corregirlos. Cancelación, fallo manejado y recuperación del rango son casos de prueba diferentes; no suponer éxito por aparecer valores.
-
-### Editar una celda operativa
-
-`Workbook_SheetChange` desactiva temporalmente eventos/pantalla para evitar recursión. Primero revisa mantenimiento y su decisión conservar/recuperar; después `ActualizarEntradaEnHoja` valida y prepara las filas de entrada afectadas, recupera H de forma especial e I:T desde sus modelos y prepara la siguiente fila. `ActualizarRespaldoDespuesDeEntrada` mantiene el respaldo coherente si corresponde. La salida del evento restaura los estados anteriores; no debe terminarse con End/Reset.
-
-### MENÚ: cuentas y filas
-
-Para editar cuentas se requiere autorización; la hoja sigue protegida con las celdas permitidas desbloqueadas. `AgregarFilaMenu` reutiliza autorización de cuentas o mantenimiento vigente; si no existe, solicita y comprueba la clave antes de inspeccionar cuentas o fórmulas, sin habilitar todavía A/B. Se basa en la última información A/B, no en la última fórmula preparada C:L. Por eso repetir el botón sin llenar cuentas vuelve a la misma fila, ahora sin reemplazar sus fórmulas completas. No inserta/desplaza filas ni crea operativas. `EliminarUltimaFilaMenu` no cambia: pide clave siempre, considera contenido/fórmulas A:L, protege fila 10 y rechaza una asociación existente; conserva el borde inferior de la fila superior.
-
-### Ajuste de AgregarFilaMenu
-
-La comprobación se limita a las diez celdas C:L del destino, **sin interpretar sus resultados** ni comparar su semántica contable con el modelo:
-
-| Estado de C:L en el destino | Acción |
+| Componente | Responsabilidad y punto de entrada |
 |---|---|
-| Todas vacías, sin contenido ni fórmulas | Conserva el procedimiento anterior de copia de fórmulas, formato y validaciones desde C10:L10; K/L se dejan visualmente vacías para una fila nueva. |
-| Las diez celdas tienen fórmulas, sin texto #REF! en ellas | Conserva fórmulas, formatos y validaciones existentes; no pega ni pregunta por reemplazo. Autoriza A/B conforme al permiso vigente, selecciona A de esa fila y avisa dónde ingresar ambas cuentas. |
-| Mezcla de fórmulas y vacíos, constantes, errores constantes u otra preparación incompleta | Avisa y sale sin sobrescribir ni habilitar una nueva autorización. El permiso de cuentas o mantenimiento que ya estuviera vigente se mantiene. |
-| Una fórmula contiene #REF! | Avisa y sale para revisión, aunque IFERROR oculte el error. No repara referencias ni vínculos. La búsqueda es textual y también detiene una fórmula que incluya ese texto como literal. |
+| Módulo 1: [BorrarDatos compatible](Modular-v7-Corte2-Base1000/Modulo-1-limpieza-zona-gris.txt) | Borra entradas A:G y U:V desde la fila 12. Llama a `LimpiarFormulasFinalesVacias` con la extensión anterior; no sustituya el Módulo 1 entero si contiene otras rutinas. |
+| Módulo 2: [parche de Reclasificación](Modulo-2-v1-PARCHE.txt) | `copiar_reclasificacion` toma la hoja activa. Con el parche, `Hoja1` queda con sus encabezados si no hay entradas y las tablas de `Hoja2` permanecen en la continuación original. El TXT **no es un módulo completo**. |
+| Módulo 3: [ALCON v3](Modulo-3-v3.txt) | `ALCON` toma la hoja activa y usa la hoja técnica ALCON. Con la versión compatible, habilita temporalmente la estructura para mostrar/ocultar ALCON y restaura el estado. El nombre operativo puede aparecer sugerido al guardar su salida. |
+| Módulo 4: una variante v8 | Orquesta validación, importación, protección, MENÚ, plantillas, zona calculada y exportación. No duplique sus procedimientos. |
+| [NeteoValidaciones](Modular-v7-Corte2-Base1000/NeteoValidaciones.txt) | `RevisarFilas`, reglas de entrada, listas, marcas rojas y cambios por bloques. |
+| [NeteoDependencias](Modular-v7-Corte2-Base1000/NeteoDependencias.txt) | `VerificarDependenciasPlantilla` inspecciona referencias de creación/eliminación; `ExcluirZona` resta rectángulos conservados. |
+| [NeteoRespaldos](Modular-v7-Corte2-Base1000/NeteoRespaldos.txt) | `CrearRespaldo`, `CapturarContenido`, `RestaurarContenido` y compatibilidad de rangos. Mantener el módulo; la eliminación de una hoja no invoca el auxiliar histórico de copia a disco. |
+| [ThisWorkbook v4](ThisBook-v4.txt) | Conservar el módulo de objeto. `Workbook_Open` repone protección; `Workbook_SheetChange` coordina cambios; `Workbook_BeforeSave` valida; `Workbook_BeforeClose` finaliza permisos; eventos de hoja gestionan la salida de MENÚ. No pegar estos eventos en un módulo estándar. |
 
-Una fórmula que devuelve vacío, cero, #N/A u otro error de cálculo no se rechaza solo por ese resultado. Esto no demuestra que la fórmula sea contablemente correcta ni que sus vínculos estén disponibles. Un valor fijo, aunque parezca un resultado correcto, no cuenta como fórmula preparada. Formatos o validaciones sin contenido no cuentan como preparación: se sigue la rama vacía y se aplica el modelo como antes.
+**Estado y fronteras.** Módulo 4 conserva en privado `hojaMantenimiento`, `respaldoMantenimiento` y `hojaCuentasMenu`. `CLAVE_HOJA` es la única constante compartida; no la copie ni exponga su valor. Los nombres definidos `_NeteoV3_Mantenimiento` y `_NeteoV4_Cuentas` ayudan a reconocer autorizaciones interrumpidas; los nombres de `PREFIJO_CONSERVAR` protegen zonas que se decidió conservar. No borre esos nombres indiscriminadamente. `ThisWorkbook` es dueño de `menuPendiente`. Los tres auxiliares son módulos internos (`Option Private Module`) y no son puntos de entrada para botones.
 
-Se conservan las comprobaciones previas de K10/L10 y su referencia a PLANTILLA 01. La fila 10 es el modelo mínimo: si C10:L10 está completo se conserva, incluidos K10/L10; no se envuelven otra vez sus fórmulas. Si falta el propio modelo, el botón no puede reconstruirlo copiándose a sí mismo: se detiene para revisión. Las fórmulas modelo existentes deben gestionar la presentación vacía si todavía no está creada PLANTILLA 01.
+**Respaldo temporal no es copia del archivo.** Importación y mantenimiento usan respaldos temporales para revertir fallos manejados o cambios rechazados. `EliminarUltimaFilaMenu` también puede respaldar temporalmente su rango. `EliminarUltimaPlantilla` **no crea una copia en disco**; no hay deshacer automático tras eliminar. No use **End/Reset** para cancelar: puede perder referencias al respaldo y dejar Excel o la protección en otro estado.
 
-En mantenimiento se mantiene A:L autorizado y M en adelante bloqueado. Si la fila ya estaba completa, no se vuelve a capturar su contenido en el respaldo temporal porque no se reemplazó; si se preparó una fila vacía, se conserva la captura anterior. Los bloqueos funcionales siguen ajustándose al modo vigente, sin reemplazar fórmulas, validaciones o formato visual de una fila completa.
+## Operación del libro
 
-Ejemplo: con cuentas hasta A29/B29 y fórmulas completas en C30:L30, el botón selecciona A30 y avisa «La fila 30 ya está preparada. Ingrese las cuentas en A30 y B30. No se reemplazaron sus fórmulas». Después de ingresar cuentas en A30/B30, la siguiente ejecución apunta a la fila 31. Clave incorrecta o cancelada no reemplaza contenido ni habilita permisos. Esta lógica no agrega un cuadro de confirmación nuevo.
+### Protección, validación e importación
 
-Al salir manualmente de MENÚ, sus eventos pueden preguntar si se bloquea o mantiene el permiso; se repite mientras continúe autorizado. Las navegaciones internas con eventos desactivados no generan ese mismo aviso. Guardar/cerrar o volver a proteger finaliza autorización según el flujo actual.
+- **Operativas:** entradas A:G y U:V desde la fila 12; H:T es zona calculada y W en adelante permanece bloqueado. En mantenimiento se habilita A:V, incluidos encabezados. **MENÚ:** cerrado por defecto; el permiso de cuentas habilita A:B desde la fila 10 y el mantenimiento permite A:L, incluidos encabezados. DATOS, ALCON y el modelo PLANTILLA no se habilitan con `DesbloquearHoja`.
+- `DesbloquearHoja` ofrece permiso para cuentas de MENÚ o **Otra acción** (mantenimiento). `VolverAProtegerHoja` finaliza y restablece el modo normal. Al salir de MENÚ hacia otra hoja del mismo libro, `AvisarSalidaMenu` puede preguntar si conserva el permiso. No es el mismo flujo que cambiar de libro.
+- En mantenimiento, `GestionarCambioMantenimiento` conserva la edición aceptada o recupera el contenido inmediatamente anterior de la zona calculada y encabezados. Las entradas de un pegado mixto no se deshacen con esa decisión.
+- `ValidarTodo_ReglasNegocio` revisa la operativa activa. `Workbook_BeforeSave` finaliza permisos y llama a `ValidarTodasLasHojasTrabajo`, también si se guarda desde MENÚ. Los errores bloquean el guardado; el permiso puede haber terminado aunque no se guarde. La validación puede actualizar datos según las reglas de Redes; **no equivale** a comprobar marcas rojas al exportar.
+- `ImportarDatosDesdeArchivoExcel` pega valores en la zona editable sin reorganizar columnas. Comprueba todo el destino, confirma reemplazo y respalda el rango afectado. Una cancelación previa no cambia datos; ante un fallo manejado intenta restaurar. Los datos importados inválidos se marcan para corrección y bloquean el guardado. Un cierre forzado o un reinicio de VBA no está cubierto por esa recuperación.
 
-### Crear y eliminar plantillas
+### Base H12:T1000 y limpieza dinámica
 
-`CrearNuevaHojaDesdePlantilla` valida autorización, modelo, cuentas/fórmulas, secuencia y dependencias; copia PLANTILLA, ajusta encabezados desde MENÚ y enlaza K/L. Restaura visibilidad del modelo y estructura. No necesita rehacer las cuentas ni copiar la última operativa como modelo.
+`ULTIMA_FILA_BASE = 1000` protege las fórmulas preparadas de H12:T1000 frente a **limpieza automática**; no es un tope de datos. `ActualizarEntradaEnHoja` prepara las filas afectadas. `LimpiarFormulasFinalesVacias` solo actúa desde la 1001 en el tramo final afectado, después de la última entrada, y solo sobre fórmulas automáticas que coinciden con el modelo. No borra constantes, excepciones ni fórmulas distintas; conserva H de la siguiente fila de entrada. Por ejemplo, reducir la última fila de 1050 a 1004 puede limpiar las fórmulas elegibles de 1005:1050 y conservar H1005. No es una limpieza general de sobrantes históricos, estilos o filas físicas.
 
-`EliminarUltimaPlantilla` pide contraseña siempre y permite solo la última numerada adicional: nunca PLANTILLA 01 ni PLANTILLA. Revisa dependencias antes de Sí/No y guarda un archivo completo antes de borrar. Conserva A/B y C:J de MENÚ; deja K/L provisionales. Puede detenerse por referencias directas/rotas/dinámicas/3D u otros elementos no verificables. El recorrido de fórmulas por bloques y de validaciones por grupos **no es permiso para omitir reglas ilegibles**. Si la hoja ya se borró y hay un fallo posterior, no se promete reconstrucción automática: usar el respaldo completo de forma manual y controlada.
+Para huecos heredados, active la operativa afectada → `DesbloquearHoja` → **Otra acción** → `RecuperarBaseZonaGris` → revise → `VolverAProtegerHoja`. La recuperación es manual y por hoja; rellena solo vacíos elegibles de H12:T1000. Usa la fórmula especial de H y el modelo I:T de PLANTILLA; no sustituye fórmulas existentes o vacíos conservados. Si faltan fórmulas modelo o hay estructuras incompatibles, deténgase y revise antes de modificar el rango. `BorrarDatos` no sustituye esta recuperación.
 
-### Guardar/reabrir
+### MENÚ y hojas CUENTA
 
-`Workbook_BeforeSave` finaliza autorizaciones, restablece protección y llama a `ValidarTodasLasHojasTrabajo`. Si detecta errores o un fallo, cancela el guardado; la autorización puede haber finalizado incluso si no se guardó. `Workbook_Open` repone protección y UserInterfaceOnly al reabrir. Hay que probar ambos eventos y verificar entradas/editabilidad, no únicamente el mensaje de guardado.
-
-## 4. Estado privado, respaldos y salidas seguras
-
-| Elemento | Significado | Regla de mantenimiento |
-|---|---|---|
-| `hojaMantenimiento` | Hoja con mantenimiento autorizado en esta sesión | Privada: no volverla Public ni duplicarla en futuros módulos. |
-| `respaldoMantenimiento` | Libro temporal con contenido previo de la zona autorizada | No cerrarlo/descartarlo a mitad ni confundirlo con una copia de archivo recuperable tras cerrar Excel. |
-| `hojaCuentasMenu` | Referencia de autorización de cuentas de MENÚ | Privada; finalizarla por las rutinas existentes. |
-| `CLAVE_HOJA` | Constante central que comparten autorizaciones, hojas gestionadas y estructura | Conservar una definición; no publicar su valor en guías, mensajes o trazas. |
-| `PREFIJO_CONSERVAR` | Prefijo de nombres definidos que representan zonas conservadas; antes solo vacíos, ahora todo contenido aceptado | No limpiar nombres definidos indiscriminadamente; pueden expresar cambios autorizados. |
-
-`CrearRespaldo`, `CapturarContenido` y `RestaurarContenido` utilizan libros temporales para contenido/formato/validación según el flujo. Importar respalda el rango reemplazado; mantenimiento conserva el contenido inmediatamente anterior autorizado. No son lo mismo que `GuardarRespaldoPlantilla`, que crea un **archivo completo persistente** antes de eliminar una hoja. Un snapshot temporal no garantiza recuperación después de cerrar Excel, un fallo de proceso, End o Reset.
-
-Las rutinas conservan y procuran restaurar `Application.EnableEvents`, `ScreenUpdating` y, donde corresponde, DisplayAlerts, AutomationSecurity y EnableCancelKey. No añadir salidas que salten sus etiquetas Salida/Fallo ni su protección. **No ejecutar End/Reset durante una operación**: puede perder referencias privadas y dejar estados globales o protección sin restaurar. `RecuperarMantenimientoInterrumpido` cierra una autorización cuyo respaldo se perdió; no recupera mágicamente el contenido anterior.
-
-### Cambiar contraseña no es editar solamente la constante
-
-Si se autoriza una migración real: respaldo y Autoguardado pausado; finalizar permisos con clave antigua; desproteger estructura y hojas gestionadas con la antigua; revisar también el modelo PLANTILLA si está protegido; cambiar la definición central; reproteger explícitamente ese modelo con la nueva y preservar opciones/visibilidad; restablecer la protección gestionada y probar guardar/reabrir/crear/ALCON. **No guardar/cerrar a mitad.** `RestablecerProteccionAlAbrir` omite el modelo, así que su contraseña no se migra automáticamente. No cambiar por error las claves independientes de apertura del archivo, proyecto VBA o catálogos externos; los respaldos antiguos conservan sus protecciones anteriores. Esta entrega no cambia ninguna contraseña ni crea una utilidad de migración.
-
-## 5. Depuración mínima y segura
-
-1. Usar una copia del libro; abrir el editor desde Programador → Visual Basic si Alt+F11 no responde.
-2. Buscar la rutina por nombre. F9 alterna un punto de interrupción; F8 avanza una instrucción cuando la ejecución está detenida. Si el teclado del portátil intercepta las teclas, usar Fn cuando corresponda o las opciones equivalentes de punto de interrupción/paso a paso del menú **Depuración**.
-3. Preferir un punto antes de la mutación y continuar hasta una cancelación normal; no usar End/Reset como sustituto del flujo de salida.
-4. Abrir **Ver → Ventana Inmediato** (Ctrl+G dentro del editor). Se puede consultar, sin cambiar nada:
-
-```vb
-? Application.EnableEvents
-? Application.ScreenUpdating
-? ThisWorkbook.ProtectStructure
-? ActiveSheet.ProtectContents
-```
-
-`ProtectContents=True` no demuestra que todas las celdas estén bloqueadas: las entradas autorizadas se gobiernan también por Locked. No imprimir la constante de clave ni datos de cuentas. Copiar una traza solo desde Inmediato; Ctrl+A dentro del módulo seleccionaría su código.
-
-Si aparece un error, anotar procedimiento, paso/contexto y número exacto. No borrar validaciones ni activar eventos a ciegas para forzar que continúe. Si hubo una interrupción forzada, detener el trabajo y revisar protección/estados antes de guardar; no dar por hecho que simplemente cerrar/reabrir el libro restablecerá un estado global de Excel que quedó desactivado.
-
-## 6. Lista de verificación en el libro real
-
-No basta con que compile o aparezca un mensaje correcto. Comparar con una copia anterior equivalente y registrar resultado por caso.
-
-| Flujo | Caso mínimo y resultado a comprobar |
+| Acción | Comportamiento |
 |---|---|
-| Instalación | Cinco fuentes completas (Módulos 1/4 y tres internos); nombres internos exactos; 65 macros/APIs originales en Módulo 4 más el auxiliar compartido; proyecto compilado sin duplicados ni referencias inaccesibles. Probar figuras reales: su asignación no fue inventariada. |
-| Entrada/validación | Fecha, NIT, valor distinto de cero, V obligatoria, Cliente/Red y catálogo; valores válidos/erróneos/pegado múltiple. Mismos mensajes y marcas rojas; H especial e I:T recuperadas sin sobrescribir excepciones. |
-| Importar | Valores sin reorganizar desde origen válido; límite de zona A:G/U:V; intento de propio libro; confirmación de reemplazo con No; cancelación/fallo y recuperación del rango. No perder datos ni permitir guardado inválido. |
-| MENÚ/protección | Bloqueo predeterminado total; clave incorrecta/cancelar sin cambios; cuentas solo A/B y mantenimiento A:L. Agregar: vacío copia modelo; completo conserva C:L y selecciona A; incompleto/constante/#REF! detiene sin nuevo permiso. Eliminar fila, fila 10, asociación, conservar/restaurar contenido y aviso al salir mantienen sus reglas. |
-| Crear plantilla | Modelo PLANTILLA y fila MENÚ válidos; dependencia/gap/modelo inválido bloquea; clave y confirmación según permiso actual; error/cancelación restaura visibilidad, estructura y eventos. |
-| Eliminar plantilla | Primera comprobación responder No: nada se borra. Luego, solo en copia desechable con respaldo confirmado: última adicional, nunca 01, dependencias bloquean; A/B y C:J conservadas, K/L provisionales y estado correcto. No prometer recuperación automática tras borrado efectivo. |
-| Guardar/reabrir | Guardar desde MENÚ detecta errores operativos y bloquea; corregir y guardar. Reabrir: autorizaciones finalizadas, bloqueos/estructura y fórmulas conservadas; eventos/pantalla normales. |
-| Salidas contables | Comparar Reclasificación y ALCON con las salidas esperadas, incluida Hoja1 sin datos. No se modificaron Módulos 2/3; comprobar compatibilidad real con la nueva pareja 1/4. |
+| `AgregarFilaMenu` | Prepara la fila siguiente a la última cuenta en A o B, sin insertar ni desplazar. Si C:L está vacío, aplica el modelo C10:L10 y deja K:L de una fila nueva visualmente vacíos. Si las diez celdas ya contienen fórmulas sin `#REF!`, conserva su contenido y formato. Si la fila está incompleta, contiene constantes o `#REF!`, se detiene sin sobrescribir. La fila 10 se conserva como modelo. |
+| `EliminarUltimaFilaMenu` | Pide clave y confirmación. Limpia A:L de la última fila preparada sin desplazar otras filas; no elimina la fila 10 ni una fila asociada a una hoja. Distinguir de eliminar una hoja operativa. |
+| `CrearNuevaHojaDesdePlantilla` | Requiere BV en A, CUIF en B, fórmulas preparadas en C:L y secuencia válida. Copia el modelo reservado **PLANTILLA**, crea `CUENTA nn - CUIF` y vincula K:L de la fila correspondiente. Reutiliza autorización de MENÚ cuando procede; la clave de creación no concede ese permiso por sí misma. |
+| `RenombrarPlantillaConCuif` | Pide clave y confirmación para renombrar **solo la operativa activa**. Toma B de su fila asociada y conserva el ordinal. Si B está vacío o devuelve texto vacío, deja `CUENTA nn`; un dato no vacío e inválido no se recorta ni se sustituye. No renombra por editar B ni hace migración masiva. Verifica K:L antes y después, deja a Excel actualizar las referencias directas y no reescribe fórmulas de otras hojas. |
+| `EliminarUltimaPlantilla` | Pide clave y confirmación. Solo elimina la hoja del mayor ordinal, si este es mayor que 01 y las dependencias lo permiten. Conserva su fila, cuentas y C:J de MENÚ; K:L quedan visualmente vacías. Nunca elimina la 01, con ninguno de los prefijos, ni el modelo PLANTILLA. **No crea un respaldo a disco.** |
 
-### Pendientes y límites
+**Identidad y CUIF.** `PLANTILLA nn` y `CUENTA nn`, con o sin sufijo, comparten el mismo ordinal: **fila MENÚ = n + 9**. No deben coexistir dos hojas con el mismo ordinal ni dejarse huecos. Mantenga dos cifras para 01–99 y numeración natural a partir de 100. El sufijo usa ` - ` y dígitos ASCII. Ingrese CUIF como texto para conservar ceros iniciales o más de 15 dígitos. Si B ya es numérico, solo se acepta un entero no negativo de hasta 15 dígitos. El nombre completo admite 31 caracteres; `CUENTA 01 - ` deja hasta 19 dígitos para el sufijo, y el espacio baja si crece el ordinal. Un CUIF vacío solo se permite al renombrar una hoja existente, no al crear ni al exportar una hoja con registros.
 
-- Falta compilación y regresión completa del proyecto realmente instalado; las verificaciones de archivos no ejecutan VBA, figuras, eventos ni libros externos.
-- Siguen pendientes los vínculos a Saldos Contables GSMAP.xlsx y Cuentas Reclasificadoras Cierre Trimestral.xlsx; no se dispone de acceso/contraseñas autorizados. No romper vínculos ni intentar descifrarlos por esta entrega.
-- El límite actual de 100 caracteres de NIT sigue siendo una inconsistencia pendiente de decisión; no se cambió silenciosamente.
-- La limpieza adicional de H fue cancelada por el usuario y no forma parte del paquete.
-- Nuevos cortes (importación, MENÚ, protección/plantillas) solo después de aprobar estas regresiones, con interfaces de estado privadas bien delimitadas; no volver públicos los estados ni repartir código por número de líneas.
+**Modelo K10:L10.** Si existe la 01, ambas fórmulas modelo deben apuntar directamente a su nombre real. Antes de la primera creación se admite el nombre provisional `PLANTILLA 01` o `CUENTA 01`, pero las dos fórmulas deben usar el mismo. La creación toma el modelo antes de asignar el nombre nuevo y conserva las referencias relativas. No sustituya el nombre con búsqueda global de texto. La creación consulta hasta cuatro variantes de nombre en el guardián de dependencias; el botón de renombrado no realiza ese barrido. El guardián puede detenerse por referencias rotas, dinámicas, tridimensionales u otras dependencias no comprobables.
 
-### Pruebas focales añadidas para este corte
+## Exportación de datos
 
-- Capturar/conservar/recuperar una celda con texto literal iniciado en =, una fórmula, un valor vacío, booleano o error, sin conversiones no deseadas; comparar con el corte 1 en el libro real.
-- MENÚ: encabezados hasta fila 9 y datos desde fila 10. Operativas: encabezados hasta fila 11 y datos desde fila 12. Probar una celda, un bloque y varios bloques atravesando el límite.
-- Importación: rechazar rango incompatible antes de reemplazar; cancelar sin perder contenido; probar recuperación ante fallo manejado en copia. No certificar reversión por solo ver un mensaje.
-- Mantenimiento: conservar y luego recuperar una edición posterior respetando cambios autorizados previos, cerrar autorización y comprobar protección/eventos/pantalla.
-- Borrar plantilla: primera revisión con No; después, solo en copia desechable, comprobar archivo de respaldo visible y válido antes de eliminación, controles de referencias y K/L de MENÚ.
+`ExportarDatos` no pide contraseña. Requiere una hoja **CUENTA numerada activa de este `.xlsm`** y ningún mantenimiento activo o marcado como interrumpido. No desprotege ni termina el mantenimiento por su cuenta. Si no hay entradas, informa y no abre el selector ni crea un libro. Si hay entradas, el sufijo debe coincidir con el CUIF válido en B de su fila MENÚ; si no coincide, corrija B si corresponde y ejecute `RenombrarPlantillaConCuif`.
 
-En el corte 2 se comprobaron fuentes y modelos Python de límites, bloques y literales. El ajuste anterior de MENÚ añadió contratos de clasificación/autorización; esta entrega agrega limpieza acotada y conservación, con preservación de rutinas ajenas, identidad de internos y lectura del ZIP: **no ejecución del motor VBA ni de Excel**. Compilar y probar en copia los estados vacío/completo/incompleto, resultados vacíos o con error, clave cancelada/incorrecta, fila 10, mantenimiento, protección y figuras reales. No presentar estas comprobaciones como regresión funcional completa del libro.
+1. Determina la última entrada real en A:G/U:V, también si está oculta o filtrada. Copia A11:V11 a A1:V1 y conserva en el cuerpo las filas desde 12 hasta esa última entrada, incluidos huecos y filas ocultas/filtradas. La base hasta 1000 no limita la exportación. H:T no determina el último registro.
+2. Si detecta **relleno directo rojo exacto `RGB(255, 0, 0)`** en A:G/U:V dentro de las filas exportadas, se detiene, aunque la celda marcada esté vacía u oculta. Lee el estado: no llama a la validación que corrige datos, no modifica marcas ni interpreta cualquier color o regla condicional como rojo de validación.
+3. Si H:T contiene errores nativos de Excel, muestra **un aviso** y permite confirmar o cancelar. Si confirma, los errores se conservan como errores. Un texto literal como `#N/D` no activa el aviso. La copia conserva los textos con ceros iniciales o que parecen fórmulas como texto.
+4. El selector sugiere **`CUIF-AAAAMMDD-HHMMSS.xlsx`**, sin sufijo «valores». Cancelar el selector no crea el libro temporal; si se rechaza la continuación, no se guarda el archivo. Excel mantiene el aviso de reemplazo si el archivo elegido ya existe. La macro guarda un `.xlsx` de una hoja y cierra solo el libro de salida; no guarda ni cierra el origen.
 
-## Pruebas específicas de esta entrega
+Las dos variantes conservan anchos y estilo visible del encabezado sin trasladar sus reglas. No exportan fórmulas, macros, vínculos, conexiones, objetos, validaciones ni formatos condicionales, ni copian rellenos o estilos del cuerpo. En la variante con formato, un color incorporado al **código numérico** puede seguir visible: no equivale a copiar rellenos o reglas. Los valores se escriben por bloques; la variante con formato copia `NumberFormat` después de escribir, por columna y tramo uniforme, y subdivide solo tramos mixtos. No se ha medido cuánto tarda en el libro real; una columna muy heterogénea puede aumentar el trabajo.
 
-1. En copia, datos hasta 1005: borrar completamente A:G/U:V de 1005; conservar fila1004, H1005 y las excepciones, quitar solo fórmulas automáticas I:T elegibles de1005.
-2. Datos hasta1050: borrar1005:1050; comprobar la limpieza automática del tramo, H1005 mínima, fórmulas distintas/constantes/excepciones intactas y contenido posterior no afectado intacto.
-3. Dejar F, U o V con datos en1050 o borrar un campo: esa fila debe conservar H:T y validarse normalmente. Un hueco intermedio no es sobrante final.
-4. Volver a escribir entradas en una fila limpiada: recuperar sus H:T elegibles según modelo, sin sobreescribir decisiones conservadas.
-5. Conservar durante mantenimiento una fórmula diferente, una igual al modelo y un vacío. Borrar sus entradas; guardar/reabrir y comprobar preservación. Probar restauración inmediatamente anterior y que las fórmulas limpiadas no reaparezcan desde el respaldo.
-6. Ejecutar BorrarDatos: borrar todas sus entradas habituales, limpiar solo el tramo anterior utilizado, mantener H12/excepciones y no tocar hojas técnicas. Comprobar estados, protección, cancelaciones y errores en copia.
-7. Verificar una fila ya preparada de MENÚ: AgregarFilaMenu no vuelve a pedir reemplazar sus fórmulas. Probar las macros de cuentas/plantillas ya existentes como regresión.
-8. Probar un pegado o borrado de varias áreas y uno grande con el volumen habitual; medir antes/después si se busca cuantificar rendimiento. No afirmar resultados económicos ni rendimiento por las pruebas de fuente.
+## Diagnóstico
 
-Las pruebas automáticas entregadas internamente son contratos de fuentes y modelos de política, no un intérprete VBA, compilación ni ejecución de eventos/figuras reales. Los fallos históricos de pruebas que exigían identidad total con otra edición documental no se presentan como regresiones nuevas ni como pruebas verdes.
+| Síntoma | Dónde empezar |
+|---|---|
+| No aparece una macro o hay nombre ambiguo | Compile y compruebe que solo exista una variante v8 y que la figura apunte a `ExportarDatos` o `RenombrarPlantillaConCuif` en el `.xlsm` correcto. |
+| La hoja CUENTA no exporta | En `ExportarDatos`, revise hoja activa, mantenimiento, última entrada, B/sufijo y marcas rojas. Para un último registro filtrado, siga `UltimaFilaParaExportarDatos`; para un error H:T, revise `HayErroresParaExportarDatos` sin confundirlo con texto. |
+| La copia muestra seriales o formato inesperado | Confirme la variante instalada. En la de formato, revise `Date1904`, `EscribirValoresExportarDatos` y `CopiarFormatoNumericoExportarDatos`. Distinga el valor subyacente de lo mostrado en la celda. |
+| No crea, renombra o elimina una hoja | Revise `VerificarSecuenciaPlantillas`, `NombrePlantillaConCuif`, `VerificarModeloMenu`, `VerificarVinculosFilaMenu` y, para creación/eliminación, `VerificarDependenciasPlantilla`. No cambie el ordinal ni desplace cuentas para forzar el flujo. |
+| Permisos, eventos o fórmulas no se comportan como antes | Revise `Workbook_SheetChange`, `FinalizarMantenimiento`, `RecuperarMantenimientoInterrumpido` o `RestablecerProteccionAlAbrir`. Para crecimiento o huecos, revise las rutinas de zona gris y confirme qué versión de Módulo 1 está instalada. |
 
-## Reversión de esta entrega
+En una copia, busque el procedimiento por nombre. Use F9 para un punto de interrupción y F8 para avanzar. **Ver → Ventana Inmediato** permite consultar sin cambiar estado: `? Application.EnableEvents`, `? Application.ScreenUpdating`, `? Application.DisplayAlerts`, `? ThisWorkbook.ProtectStructure`, `? ActiveSheet.ProtectContents`. `ProtectContents=True` no prueba que una celda concreta esté bloqueada; revise también su propiedad `Locked`. Si ocurre un fallo, registre rutina, paso, mensaje y número; no registre claves ni cuentas. Si hubo una interrupción forzada, verifique estados y protección antes de guardar.
 
-Reponer juntos los contenidos anteriores de Módulo 4 y Módulo 1, conservar los tres módulos internos y compilar. No quitar módulos ni aplicar una reversión antigua de modularización. Restaurar código no recupera fórmulas/datos ya borrados; conservar la copia íntegra previa.
+## Pruebas de aceptación
 
-## Catálogo de líneas de la entrega actual
+Ejecute en una copia del `.xlsm` y compare los resultados con el libro anterior. No basta con un mensaje de éxito.
 
-### Modulo-4-v7-corte2.txt
+- [ ] **Instalación y arranque:** compilar, ejecutar botones reales, guardar/reabrir y comprobar bloqueos, permisos y estados de Excel. Confirmar las versiones instaladas de Módulos 1–3.
+- [ ] **Variantes:** exportar la misma muestra con cada variante, en instalaciones separadas. Comprobar importes negativos y positivos, fecha/hora, formatos personalizados y mixtos en una columna, texto `0012` y literal con `=`. En la de formato, probar un origen con sistema 1904. Revisar una hoja de salida, encabezados, anchos, valores y ausencia de fórmulas o vínculos.
+- [ ] **Alcance y guardias:** último registro filtrado más allá de 1000, fila oculta y huecos. Marcar rojo exacto una celda vacía/oculta dentro de la zona editable y comprobar que se bloquea. Contrastar con un rojo distinto, una marca fuera del rango y un texto `#N/D`. Un error nativo en H:T debe advertir una vez; probar **No** y **Sí**.
+- [ ] **Guardado:** comprobar nombre sugerido y extensión, cancelar el selector y rechazar el reemplazo de un archivo existente. Verificar que el origen sigue abierto, sin guardar cambios por la exportación, y que se restauran eventos, pantalla y alertas.
+- [ ] **Regresiones:** reglas de entrada y guardado desde MENÚ; importación, cancelación y reversión; zona base 12/800/1000, crecimiento y reducción 1050→1004/900; recuperación con y sin permiso. Probar MENÚ vacío/completo/incompleto, creación con BV y CUIF, ordinal repetido, renombre a `CUENTA nn` si B está vacío y vínculos K:L. Eliminar solo en una copia desechable: primero No; luego verificar que se conserva la fila y que nunca se borra la 01.
+- [ ] **Salidas y consumidores:** comparar Reclasificación y ALCON con resultados esperados. Comprobar catálogos, vínculos externos y cualquier consumidor Python con los nombres nuevos. No se verificaron esos consumidores ni se modificaron los vínculos por esta entrega.
 
-| Procedimiento | Línea |
-|---|---:|
-| `ObtenerHojaMenu` | 27 |
-| `ObtenerHojaPlantilla` | 48 |
-| `EsHojaTecnica` | 67 |
-| `EsMenu` | 80 |
-| `ExisteHoja` | 84 |
-| `CopiarAnchosColumnas` | 101 |
-| `CopiarAlturasFilas` | 114 |
-| `CopiarFormasZonaSuperior` | 127 |
-| `ValidarTodo_ReglasNegocio` | 169 |
-| `ValidarHojaTrabajo` | 185 |
-| `ValidarTodasLasHojasTrabajo` | 207 |
-| `EsCodigoOficinaValido` | 216 |
-| `EsFechaOrigenPartidaValida` | 225 |
-| `EsTipoClienteValido` | 229 |
-| `EsNitValido` | 243 |
-| `EsNombreClienteValido` | 274 |
-| `EsOficinaReclasificacionValida` | 290 |
-| `EsDescripcionPartidaValida` | 311 |
-| `EsValorPartidaValido` | 327 |
-| `EsPartidaReclasificarValida` | 332 |
-| `LimpiarTextoValidacion` | 348 |
-| `LimpiarColoresZonaEditable` | 375 |
-| `ExistenErroresMarcadosEnRojo` | 385 |
-| `ConfigurarValidacionesEntradaHojaActiva` | 398 |
-| `LimpiarValidacionesEntradaHojaActiva` | 408 |
-| `ConfigurarValidacionesEntradaEnHoja` | 430 |
-| `RestaurarValidacionesBasicasEnHoja` | 437 |
-| `ConfigurarCodigoOficina` | 442 |
-| `ConfigurarFechaOrigenPartida` | 448 |
-| `ConfigurarTipoCliente` | 454 |
-| `ConfigurarOficinaReclasificacion` | 460 |
-| `ConfigurarValorPartida` | 466 |
-| `ConfigurarPartidaReclasificar` | 472 |
-| `ObtenerNitRed` | 478 |
-| `ObtenerOficinaRed` | 514 |
-| `EsNombreRedCatalogo` | 551 |
-| `EsNitRedCatalogo` | 561 |
-| `AplicarListaRedesEnCelda` | 598 |
-| `QuitarListaRedesEnCelda` | 613 |
-| `ActualizarListaRedSegunTipoCliente` | 617 |
-| `ImportarDatosDesdeArchivoExcel` | 629 |
-| `FilaTieneDatosEntrada` | 797 |
-| `ObtenerUltimaFilaEntrada` | 807 |
-| `ObtenerUltimaFilaParaRevision` | 819 |
-| `ActualizarEntradaEnHoja` | 827 |
-| `PrepararFilasEntrada` | 855 |
-| `CompletarFormulasZonaGris` | 886 |
-| `CompletarColumnaCalculada` | 895 |
-| `LimpiarFormulasFinalesVacias` | 948 |
-| `ActualizarRespaldoDespuesDeEntrada` | 1092 |
-| `ProtegerTodasLasHojasTrabajo` | 1116 |
-| `ProtegerHojaTrabajo` | 1129 |
-| `ConfigurarBloqueoHoja` | 1134 |
-| `RestaurarEstadoHoja` | 1156 |
-| `DesbloquearHoja` | 1180 |
-| `EstaEnMantenimiento` | 1263 |
-| `RestaurarBloqueoFuncional` | 1268 |
-| `FinalizarMantenimiento` | 1292 |
-| `VolverAProtegerHoja` | 1316 |
-| `RestablecerProteccionAlAbrir` | 1335 |
-| `ProtegerEstructuraLibro` | 1350 |
-| `ZonaCalculada` | 1359 |
-| `GestionarCambioMantenimiento` | 1371 |
-| `AgregarExcepcion` | 1408 |
-| `RegistrarVaciosConservados` | 1425 |
-| `VerificarZonaMantenimiento` | 1451 |
-| `RecuperarMantenimientoInterrumpido` | 1470 |
-| `MenuAutorizado` | 1502 |
-| `AutorizarCuentasMenu` | 1510 |
-| `AvisarSalidaMenu` | 1541 |
-| `AgregarFilaMenu` | 1567 |
-| `EliminarUltimaFilaMenu` | 1679 |
-| `FilaMenuCompleta` | 1830 |
-| `VerificarModeloMenu` | 1856 |
-| `VerificarCuentasFilaMenu` | 1865 |
-| `VincularFilaMenu` | 1874 |
-| `AplicarFormulasEncabezadosDesdeMenu` | 1892 |
-| `HojaAsociadaFilaMenu` | 1908 |
-| `BordeInferiorFilaMenu` | 1935 |
-| `CrearNuevaHojaDesdePlantilla` | 1980 |
-| `EliminarUltimaPlantilla` | 2096 |
-| `ContarHojasTrabajoCreadas` | 2195 |
-| `VerificarSecuenciaPlantillas` | 2199 |
-
-### Modulo-1-limpieza-zona-gris.txt
-
-| Procedimiento | Línea |
-|---|---:|
-| `BorrarDatos` | 3 |
-
-### NeteoValidaciones.txt
-
-| Procedimiento | Línea |
-|---|---:|
-| `RevisarFilas` | 11 |
-| `FechaEntradaValida` | 87 |
-| `ValorEntradaValido` | 100 |
-| `HayDatosEnFila` | 124 |
-| `EscribirCambios` | 136 |
-| `MarcarErrores` | 159 |
-| `QuitarRojoEnRango` | 180 |
-| `ConfigurarReglaEnRango` | 194 |
-| `PrepararListasRed` | 244 |
-
-### NeteoDependencias.txt
-
-| Procedimiento | Línea |
-|---|---:|
-| `VerificarDependenciasPlantilla` | 8 |
-| `VerificarTextoDependencia` | 95 |
-| `VerificarValidacionesDependientes` | 128 |
-| `VerificarFormulasDependientes` | 199 |
-| `ExcluirZona` | 271 |
-
-### NeteoRespaldos.txt
-
-| Procedimiento | Línea |
-|---|---:|
-| `CrearRespaldo` | 11 |
-| `TextosLiterales` | 32 |
-| `CapturarContenido` | 49 |
-| `RestaurarContenido` | 94 |
-| `VerificarContenidoRestaurable` | 140 |
-| `GuardarRespaldoPlantilla` | 165 |
-
+**Alcance de verificación:** se revisaron las fuentes y modelos de comportamiento; no se compiló ni ejecutó el proyecto VBA v8 completo en Excel. Quedan por probar el libro real, su volumen y dependencias externas. El máximo de 100 caracteres que `EsNitValido` aplica al NIT sigue siendo un punto de negocio pendiente de decisión; no se confunde con el CUIF ni con un límite de filas.
