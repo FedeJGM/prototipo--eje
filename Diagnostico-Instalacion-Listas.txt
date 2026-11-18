@@ -1,0 +1,65 @@
+﻿Public Sub DiagnosticarInstalacionListas()
+    Dim etapa As String, ultimaCorrecta As String, direccion As String, columna As Variant
+    Dim ws As Worksheet, menu As Worksheet, modelo As Worksheet, datos As Worksheet, zona As Range, marca As Name
+    Dim hojas As Collection, limites As Collection, estados As Collection, estado As Variant, aplicacion As Variant
+    Dim numero As Long, ultima As Long, numeroError As Long, descripcionError As String, origenError As String
+    On Error GoTo Fallo
+    etapa = "Leer estados de aplicación": Debug.Print "INICIO " & etapa
+    aplicacion = Array(Application.EnableEvents, Application.ScreenUpdating, Application.EnableCancelKey): ultimaCorrecta = etapa
+    etapa = "Comprobar libro activo y formato": Debug.Print "INICIO " & etapa
+    If Not (ActiveWorkbook Is ThisWorkbook) Then Err.Raise 5, , "Active el libro que contiene esta macro."
+    If ThisWorkbook.ReadOnly Or ThisWorkbook.Path = "" Or ThisWorkbook.FileFormat <> xlOpenXMLWorkbookMacroEnabled Then Err.Raise 5, , "Se requiere una copia .xlsm guardada con permiso de escritura."
+    If InStr(1, ThisWorkbook.Path, "://", vbTextCompare) > 0 Then Err.Raise 5, , "Se requiere una ruta de Windows, no una dirección web."
+    ultimaCorrecta = etapa: etapa = "Consultar autorizaciones activas": Debug.Print "INICIO " & etapa
+    If Not hojaMantenimiento Is Nothing Or Not hojaCuentasMenu Is Nothing Then Err.Raise 5, , "Finalice primero el mantenimiento o la autorización de cuentas."
+    ultimaCorrecta = etapa: etapa = "ObtenerHojaMenu": Debug.Print "INICIO " & etapa
+    Set menu = ObtenerHojaMenu(): If menu Is Nothing Then Err.Raise 5, , "Falta MENÚ."
+    ultimaCorrecta = etapa: etapa = "Consultar marca _NeteoV3_Mantenimiento": Debug.Print "INICIO " & etapa
+    For Each marca In ThisWorkbook.Names
+        If StrComp(marca.Name, "_NeteoV3_Mantenimiento", vbTextCompare) = 0 Then Err.Raise 5, , "Existe mantenimiento pendiente."
+    Next marca
+    ultimaCorrecta = etapa: etapa = "Consultar marca _NeteoV4_Cuentas": Debug.Print "INICIO " & etapa
+    For Each marca In ThisWorkbook.Names
+        If StrComp(marca.Name, "_NeteoV4_Cuentas", vbTextCompare) = 0 Then Err.Raise 5, , "Existe autorización de cuentas pendiente."
+    Next marca
+    ultimaCorrecta = etapa: etapa = "ObtenerHojaPlantilla": Debug.Print "INICIO " & etapa
+    Set modelo = ObtenerHojaPlantilla(): If modelo Is Nothing Then Err.Raise 5, , "Falta PLANTILLA."
+    ultimaCorrecta = etapa: etapa = "VerificarCatalogosParaInstalacion": Debug.Print "INICIO " & etapa
+    NeteoValidaciones.VerificarCatalogosParaInstalacion
+    ultimaCorrecta = etapa: etapa = "Localizar DATOS": Debug.Print "INICIO " & etapa
+    Set datos = ThisWorkbook.Worksheets("DATOS")
+    ultimaCorrecta = etapa: etapa = "Crear colecciones temporales de memoria": Debug.Print "INICIO " & etapa
+    Set hojas = New Collection: Set limites = New Collection: Set estados = New Collection: ultimaCorrecta = etapa
+    For Each ws In ThisWorkbook.Worksheets
+        etapa = "NumeroPlantilla | " & ws.Name: Debug.Print "INICIO " & etapa
+        numero = NumeroPlantilla(ws.Name): ultimaCorrecta = etapa
+        If (ws Is modelo) Or numero > 0 Then
+            etapa = "LimiteMigracionListas | " & ws.Name & " | D/G/U/V desde fila 12": Debug.Print "INICIO " & etapa
+            ultima = LimiteMigracionListas(ws): ultimaCorrecta = etapa
+            For Each columna In Array("D", "G", "U", "V")
+                direccion = CStr(columna) & "12:" & CStr(columna) & ultima
+                etapa = "Obtener rango | " & ws.Name & "!" & direccion: Debug.Print "INICIO " & etapa
+                Set zona = ws.Range(direccion): ultimaCorrecta = etapa
+                etapa = "Leer MergeCells | " & ws.Name & "!" & direccion: Debug.Print "INICIO " & etapa
+                If IsNull(zona.MergeCells) Then Err.Raise 5, , "Hay celdas combinadas en el destino."
+                If zona.MergeCells Then Err.Raise 5, , "Hay celdas combinadas en el destino."
+                ultimaCorrecta = etapa: etapa = "VerificarReglasMigracion | " & ws.Name & "!" & direccion: Debug.Print "INICIO " & etapa
+                NeteoValidaciones.VerificarReglasMigracion zona: ultimaCorrecta = etapa
+            Next columna
+            etapa = "Agregar hoja y límite a colecciones | " & ws.Name: Debug.Print "INICIO " & etapa
+            hojas.Add ws: limites.Add ultima: ultimaCorrecta = etapa
+            etapa = "EstadoProteccionListas | " & ws.Name: Debug.Print "INICIO " & etapa
+            estado = EstadoProteccionListas(ws): ultimaCorrecta = etapa
+            etapa = "Agregar estado de protección a colección | " & ws.Name: Debug.Print "INICIO " & etapa
+            estados.Add estado: ultimaCorrecta = etapa
+        End If
+    Next ws
+    etapa = "EstadoProteccionListas | DATOS": Debug.Print "INICIO " & etapa
+    estado = EstadoProteccionListas(datos): ultimaCorrecta = etapa
+    MsgBox "Comprobaciones previas superadas. No se ejecutó la instalación ni se modificaron datos.", vbInformation
+    Exit Sub
+Fallo:
+    numeroError = Err.Number: descripcionError = Err.Description: origenError = Err.Source
+    Debug.Print "FALLO | " & etapa & " | " & CStr(numeroError) & " | " & origenError
+    MsgBox "Diagnóstico detenido." & vbCrLf & "Etapa: " & etapa & vbCrLf & "Última superada: " & ultimaCorrecta & vbCrLf & "Error: " & numeroError & vbCrLf & "Origen: " & origenError & vbCrLf & "Descripción: " & descripcionError & vbCrLf & "No se ejecutó la instalación ni se modificaron datos.", vbExclamation
+End Sub
